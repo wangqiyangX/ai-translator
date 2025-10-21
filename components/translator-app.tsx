@@ -22,6 +22,7 @@ import {
   FileText,
   Download,
   Clipboard,
+  Check,
 } from "lucide-react";
 import {
   Dialog,
@@ -105,6 +106,8 @@ interface ApiConfig {
 const STORAGE_KEY = "ai-translator-config";
 
 export default function TranslatorApp() {
+  const [isCopied, setIsCopied] = useState(false);
+
   const [sourceText, setSourceText] = useState("");
   const [translatedText, setTranslatedText] = useState("");
   const [sourceLang, setSourceLang] = useState("en");
@@ -240,7 +243,15 @@ export default function TranslatorApp() {
 
   const handleCopyTranslation = () => {
     navigator.clipboard.writeText(translatedFileContent);
+    setIsCopied(true);
   };
+
+  useEffect(() => {
+    if (isCopied) {
+      const timer = setTimeout(() => setIsCopied(false), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [isCopied]);
 
   const handleDownloadTranslation = () => {
     if (!translatedFileContent || !selectedFile) return;
@@ -503,7 +514,7 @@ export default function TranslatorApp() {
                   )}
                 </Button>
 
-                {translatedFileContent && (
+                {!translatedFileContent && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="file-translation">
@@ -511,8 +522,17 @@ export default function TranslatorApp() {
                       </Label>
                       <div className="flex gap-2">
                         <Button onClick={handleCopyTranslation} size="sm">
-                          <Clipboard className="h-4 w-4" />
-                          Copy
+                          {isCopied ? (
+                            <>
+                              <Check className="h-4 w-4" />
+                              Copied
+                            </>
+                          ) : (
+                            <>
+                              <Clipboard className="h-4 w-4" />
+                              Copy
+                            </>
+                          )}
                         </Button>
                         <Button
                           onClick={handleDownloadTranslation}
