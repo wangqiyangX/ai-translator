@@ -23,6 +23,9 @@ import {
   Download,
   Clipboard,
   Check,
+  Image,
+  TextInitial,
+  Trash,
 } from "lucide-react";
 import {
   Dialog,
@@ -393,19 +396,23 @@ export default function TranslatorApp() {
         </div>
       </div>
 
-      <Tabs defaultValue="text" className="w-full">
-        <TabsList className="grid w-full max-w-md mx-auto grid-cols-2 mb-6">
+      <Tabs defaultValue="text">
+        <TabsList className="mb-6 md:mx-auto">
           <TabsTrigger value="text" className="gap-2">
-            <FileText className="h-4 w-4" />
-            Translate Text
+            <TextInitial className="h-4 w-4" />
+            Text
           </TabsTrigger>
           <TabsTrigger value="file" className="gap-2">
-            <Upload className="h-4 w-4" />
-            Translate File
+            <FileText className="h-4 w-4" />
+            Document
+          </TabsTrigger>
+          <TabsTrigger value="image" className="gap-2">
+            <Image className="h-4 w-4" />
+            Image
           </TabsTrigger>
         </TabsList>
 
-        <div className="flex gap-2 mb-4 items-center">
+        <div className="flex gap-2 mb-1 items-center">
           <Select value={sourceLang} onValueChange={setSourceLang}>
             <SelectTrigger id="source-lang" className="w-[120px]">
               <SelectValue />
@@ -479,21 +486,16 @@ export default function TranslatorApp() {
                     />
                     {selectedFile && (
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="destructive"
                         onClick={() => {
                           setSelectedFile(null);
                           setTranslatedFileContent("");
                         }}
                       >
-                        Clear
+                        <Trash />
                       </Button>
                     )}
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    Supported formats: .md, .mdx, .txt, .jpg, .jpeg, .png, .gif,
-                    .webp
-                  </p>
                   {selectedFile && (
                     <p className="text-sm font-medium">
                       Selected: {selectedFile.name} (
@@ -563,6 +565,9 @@ export default function TranslatorApp() {
               </div>
             </CardContent>
           </Card>
+          <p className="text-sm text-muted-foreground p-2">
+            Supported formats: .md, .mdx, .txt, .docx
+          </p>
         </TabsContent>
       </Tabs>
     </div>
