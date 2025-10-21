@@ -12,13 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   ArrowRightLeft,
   Languages,
@@ -27,6 +21,7 @@ import {
   Upload,
   FileText,
   Download,
+  Clipboard,
 } from "lucide-react";
 import {
   Dialog,
@@ -243,6 +238,10 @@ export default function TranslatorApp() {
     }
   };
 
+  const handleCopyTranslation = () => {
+    navigator.clipboard.writeText(translatedFileContent);
+  };
+
   const handleDownloadTranslation = () => {
     if (!translatedFileContent || !selectedFile) return;
 
@@ -252,10 +251,10 @@ export default function TranslatorApp() {
     a.href = url;
     const originalName = selectedFile.name;
     const extension = originalName.substring(originalName.lastIndexOf("."));
-    a.download = `translated_${originalName.replace(
+    a.download = `${originalName.replace(
       extension,
       ""
-    )}_${targetLang}${extension}`;
+    )}-${targetLang}${extension}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -510,14 +509,20 @@ export default function TranslatorApp() {
                       <Label htmlFor="file-translation">
                         Translated Content
                       </Label>
-                      <Button
-                        onClick={handleDownloadTranslation}
-                        variant="outline"
-                        size="sm"
-                      >
-                        <Download className="mr-2 h-4 w-4" />
-                        Download
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button onClick={handleCopyTranslation} size="sm">
+                          <Clipboard className="h-4 w-4" />
+                          Copy
+                        </Button>
+                        <Button
+                          onClick={handleDownloadTranslation}
+                          variant="outline"
+                          size="sm"
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Download
+                        </Button>
+                      </div>
                     </div>
                     <Textarea
                       id="file-translation"
