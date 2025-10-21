@@ -33,6 +33,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Spinner } from "@/components/ui/spinner";
+import { ModeToggle } from "./mode-toggle";
 
 const LANGUAGES = [
   { code: "en", name: "English" },
@@ -299,93 +301,96 @@ export default function TranslatorApp() {
           </div>
         </div>
 
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="icon">
-              <Settings className="h-4 w-4" />
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>API Settings</DialogTitle>
-              <DialogDescription>
-                Configure your AI API settings. Leave fields empty to use the
-                default gateway.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="api-key">API Key</Label>
-                <Input
-                  id="api-key"
-                  type="password"
-                  placeholder="sk-... or your provider's API key"
-                  value={tempApiConfig.apiKey}
-                  onChange={(e) =>
-                    setTempApiConfig({
-                      ...tempApiConfig,
-                      apiKey: e.target.value,
-                    })
-                  }
-                />
-                <p className="text-sm text-muted-foreground">
-                  Optional. Your API key is stored locally and never sent to our
-                  servers.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="base-url">Base URL</Label>
-                <Input
-                  id="base-url"
-                  type="url"
-                  placeholder="https://api.openai.com/v1"
-                  value={tempApiConfig.baseUrl}
-                  onChange={(e) =>
-                    setTempApiConfig({
-                      ...tempApiConfig,
-                      baseUrl: e.target.value,
-                    })
-                  }
-                />
-                <p className="text-sm text-muted-foreground">
-                  Optional. Use a custom API-compatible endpoint.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="model">Model</Label>
-                <Select
-                  value={tempApiConfig.model}
-                  onValueChange={(value) =>
-                    setTempApiConfig({ ...tempApiConfig, model: value })
-                  }
-                >
-                  <SelectTrigger id="model">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MODELS.map((model) => (
-                      <SelectItem key={model.value} value={model.value}>
-                        {model.label}{" "}
-                        <span className="text-muted-foreground text-xs">
-                          ({model.provider})
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-sm text-muted-foreground">
-                  Select the model to use for translation.
-                </p>
-              </div>
-
-              <Button onClick={handleSaveApiConfig} className="w-full">
-                Save Settings
+        <div className="flex gap-1">
+          <ModeToggle />
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <Settings className="h-4 w-4" />
               </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>API Settings</DialogTitle>
+                <DialogDescription>
+                  Configure your AI API settings. Leave fields empty to use the
+                  default gateway.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="api-key">API Key</Label>
+                  <Input
+                    id="api-key"
+                    type="password"
+                    placeholder="sk-... or your provider's API key"
+                    value={tempApiConfig.apiKey}
+                    onChange={(e) =>
+                      setTempApiConfig({
+                        ...tempApiConfig,
+                        apiKey: e.target.value,
+                      })
+                    }
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Optional. Your API key is stored locally and never sent to
+                    our servers.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="base-url">Base URL</Label>
+                  <Input
+                    id="base-url"
+                    type="url"
+                    placeholder="https://api.openai.com/v1"
+                    value={tempApiConfig.baseUrl}
+                    onChange={(e) =>
+                      setTempApiConfig({
+                        ...tempApiConfig,
+                        baseUrl: e.target.value,
+                      })
+                    }
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Optional. Use a custom API-compatible endpoint.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="model">Model</Label>
+                  <Select
+                    value={tempApiConfig.model}
+                    onValueChange={(value) =>
+                      setTempApiConfig({ ...tempApiConfig, model: value })
+                    }
+                  >
+                    <SelectTrigger id="model">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MODELS.map((model) => (
+                        <SelectItem key={model.value} value={model.value}>
+                          {model.label}{" "}
+                          <span className="text-muted-foreground text-xs">
+                            ({model.provider})
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-sm text-muted-foreground">
+                    Select the model to use for translation.
+                  </p>
+                </div>
+
+                <Button onClick={handleSaveApiConfig} className="w-full">
+                  Save Settings
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <Tabs defaultValue="text" className="w-full">
@@ -503,12 +508,12 @@ export default function TranslatorApp() {
                 >
                   {isTranslatingFile ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Spinner className="size-4" />
                       Translating File...
                     </>
                   ) : (
                     <>
-                      <Upload className="mr-2 h-4 w-4" />
+                      <Upload className="size-4" />
                       Translate File
                     </>
                   )}
