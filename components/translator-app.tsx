@@ -12,20 +12,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   ArrowRightLeft,
   Languages,
-  Loader2,
   Settings,
-  Upload,
   FileText,
-  Download,
-  Clipboard,
-  Check,
-  Image,
+  ImageIcon,
   TextInitial,
-  Trash,
+  Check,
+  Clipboard,
+  Download,
+  ArrowRight,
+  Globe,
 } from "lucide-react";
 import {
   Dialog,
@@ -36,8 +34,15 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Spinner } from "@/components/ui/spinner";
 import { ModeToggle } from "./mode-toggle";
+import {
+  Dropzone,
+  DropzoneContent,
+  DropzoneEmptyState,
+} from "@/components/ui/shadcn-io/dropzone";
+import { Spinner } from "@/components/ui/spinner";
+import { Separator } from "@/components/ui/separator";
+import Image from "next/image";
 
 const LANGUAGES = [
   { code: "en", name: "English" },
@@ -119,7 +124,11 @@ export default function TranslatorApp() {
   const [targetLang, setTargetLang] = useState("zh");
   const [isTranslating, setIsTranslating] = useState(false);
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedDocuments, setSelectedDocuments] = useState<
+    File[] | undefined
+  >();
+  const [selectedImages, setSelectedImages] = useState<File[] | undefined>();
+  const [preview, setPreview] = useState<string | null>(null);
   const [translatedFileContent, setTranslatedFileContent] = useState("");
   const [isTranslatingFile, setIsTranslatingFile] = useState(false);
 
@@ -206,14 +215,14 @@ export default function TranslatorApp() {
   };
 
   const handleFileTranslate = async () => {
-    if (!selectedFile) return;
+    if (!selectedDocuments) return;
 
     setIsTranslatingFile(true);
     setTranslatedFileContent("");
 
     try {
       const formData = new FormData();
-      formData.append("file", selectedFile);
+      formData.append("file", selectedDocuments[0]);
       formData.append("sourceLang", sourceLang);
       formData.append("targetLang", targetLang);
       formData.append("model", apiConfig.model);
@@ -259,13 +268,13 @@ export default function TranslatorApp() {
   }, [isCopied]);
 
   const handleDownloadTranslation = () => {
-    if (!translatedFileContent || !selectedFile) return;
+    if (!translatedFileContent || !selectedDocuments) return;
 
     const blob = new Blob([translatedFileContent], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const originalName = selectedFile.name;
+    const originalName = selectedDocuments[0].name;
     const extension = originalName.substring(originalName.lastIndexOf("."));
     a.download = `${originalName.replace(
       extension,
@@ -294,10 +303,10 @@ export default function TranslatorApp() {
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-primary/10 rounded-lg">
-            <Languages className="h-8 w-8 text-primary" />
+            <Globe className="h-8 w-8 text-primary" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-balance">AI Translator</h1>
+            <h1 className="text-2xl font-bold text-balance">AI Translator</h1>
             <p className="text-muted-foreground text-pretty">
               Powered by Vercel AI SDK
             </p>
@@ -396,58 +405,58 @@ export default function TranslatorApp() {
         </div>
       </div>
 
-      <Tabs defaultValue="text">
+      <div className="flex gap-2 items-center mb-4">
+        <Select value={sourceLang} onValueChange={setSourceLang}>
+          <SelectTrigger id="source-lang" className="w-[120px]" size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LANGUAGES.map((lang) => (
+              <SelectItem key={lang.code} value={lang.code}>
+                {lang.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Button
+          onClick={handleSwapLanguages}
+          variant="ghost"
+          size="sm"
+          disabled={isTranslating}
+        >
+          <ArrowRightLeft className="h-4 w-4" />
+        </Button>
+
+        <Select value={targetLang} onValueChange={setTargetLang}>
+          <SelectTrigger id="target-lang" className="w-[120px]" size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LANGUAGES.map((lang) => (
+              <SelectItem key={lang.code} value={lang.code}>
+                {lang.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <Tabs defaultValue="document">
         <TabsList className="mb-6 md:mx-auto">
           <TabsTrigger value="text" className="gap-2">
             <TextInitial className="h-4 w-4" />
             Text
           </TabsTrigger>
-          <TabsTrigger value="file" className="gap-2">
+          <TabsTrigger value="document" className="gap-2">
             <FileText className="h-4 w-4" />
             Document
           </TabsTrigger>
           <TabsTrigger value="image" className="gap-2">
-            <Image className="h-4 w-4" />
+            <ImageIcon className="h-4 w-4" />
             Image
           </TabsTrigger>
         </TabsList>
-
-        <div className="flex gap-2 mb-1 items-center">
-          <Select value={sourceLang} onValueChange={setSourceLang}>
-            <SelectTrigger id="source-lang" className="w-[120px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LANGUAGES.map((lang) => (
-                <SelectItem key={lang.code} value={lang.code}>
-                  {lang.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Button
-            onClick={handleSwapLanguages}
-            variant="ghost"
-            size="sm"
-            disabled={isTranslating}
-          >
-            <ArrowRightLeft className="h-4 w-4" />
-          </Button>
-
-          <Select value={targetLang} onValueChange={setTargetLang}>
-            <SelectTrigger id="target-lang" className="w-[120px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LANGUAGES.map((lang) => (
-                <SelectItem key={lang.code} value={lang.code}>
-                  {lang.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
 
         <TabsContent value="text">
           <div className="grid md:grid-cols-2 gap-2">
@@ -469,66 +478,53 @@ export default function TranslatorApp() {
           </div>
         </TabsContent>
 
-        <TabsContent value="file">
-          <Card>
-            <CardContent>
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-4">
-                    <Input
-                      id="file-upload"
-                      type="file"
-                      accept=".md,.mdx,.txt,.jpg,.jpeg,.png,.gif,.webp"
-                      onChange={(e) =>
-                        setSelectedFile(e.target.files?.[0] || null)
-                      }
-                      className="flex-1"
-                    />
-                    {selectedFile && (
-                      <Button
-                        variant="destructive"
-                        onClick={() => {
-                          setSelectedFile(null);
-                          setTranslatedFileContent("");
-                        }}
-                      >
-                        <Trash />
-                      </Button>
-                    )}
-                  </div>
-                  {selectedFile && (
-                    <p className="text-sm font-medium">
-                      Selected: {selectedFile.name} (
-                      {(selectedFile.size / 1024).toFixed(2)} KB)
-                    </p>
-                  )}
-                </div>
+        <TabsContent value="document">
+          <Dropzone
+            accept={{ "text/mdx": [] }}
+            maxFiles={1}
+            onDrop={(files: File[]) => {
+              setSelectedDocuments(files);
+            }}
+            onError={console.error}
+            src={selectedDocuments}
+            className="min-h-[140px]"
+          >
+            <DropzoneEmptyState />
+            <DropzoneContent />
+          </Dropzone>
 
-                <Button
-                  onClick={handleFileTranslate}
-                  disabled={isTranslatingFile || !selectedFile}
-                >
-                  {isTranslatingFile ? (
-                    <>
-                      <Spinner className="size-4" />
-                      Translating File...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="size-4" />
-                      Translate File
-                    </>
-                  )}
-                </Button>
-
-                {translatedFileContent && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="file-translation">
-                        Translated Content
-                      </Label>
-                      <div className="flex gap-2">
-                        <Button onClick={handleCopyTranslation} size="sm">
+          {selectedDocuments && (
+            <>
+              <Separator className="my-4" />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="file-translation">Translated Content</Label>
+                  <div className="flex gap-2 items-center">
+                    <Button
+                      onClick={handleFileTranslate}
+                      disabled={isTranslatingFile || !selectedDocuments}
+                      size="sm"
+                    >
+                      {isTranslatingFile ? (
+                        <>
+                          <Spinner className="size-4" />
+                          Translating...
+                        </>
+                      ) : (
+                        <>
+                          <Languages />
+                          Translate
+                        </>
+                      )}
+                    </Button>
+                    {translatedFileContent && (
+                      <>
+                        <Button
+                          variant="outline"
+                          onClick={handleCopyTranslation}
+                          size="sm"
+                          disabled={translatedFileContent.length === 0}
+                        >
                           {isCopied ? (
                             <>
                               <Check className="h-4 w-4" />
@@ -545,29 +541,68 @@ export default function TranslatorApp() {
                           onClick={handleDownloadTranslation}
                           variant="outline"
                           size="sm"
+                          disabled={translatedFileContent.length === 0}
                         >
                           <Download className="mr-2 h-4 w-4" />
                           Download
                         </Button>
-                      </div>
-                    </div>
-                    <Textarea
-                      id="file-translation"
-                      value={translatedFileContent}
-                      readOnly
-                      className="min-h-[400px] resize-none bg-muted/50 font-mono text-sm"
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      {translatedFileContent.length} characters
-                    </p>
+                      </>
+                    )}
                   </div>
-                )}
+                </div>
+                <Textarea
+                  id="file-translation"
+                  value={translatedFileContent}
+                  readOnly
+                  className="h-full min-h-[400px] resize-none bg-muted/50 font-mono text-sm"
+                />
+                <p className="text-sm text-muted-foreground">
+                  {translatedFileContent.length} characters
+                </p>
               </div>
-            </CardContent>
-          </Card>
-          <p className="text-sm text-muted-foreground p-2">
-            Supported formats: .md, .mdx, .txt, .docx
-          </p>
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="image">
+          <Dropzone
+            accept={{ "image/*": [] }}
+            maxFiles={1}
+            onDrop={(files: File[]) => {
+              console.log(files);
+              setSelectedImages(files);
+              const imageUrl = URL.createObjectURL(files[0]);
+              setPreview(imageUrl);
+            }}
+            onError={console.error}
+            src={selectedImages}
+            className="min-h-[140px]"
+          >
+            <DropzoneEmptyState />
+            <DropzoneContent />
+          </Dropzone>
+          <div className="space-y-2">
+            {preview && (
+              <>
+                <Separator className="my-4" />
+                <div className="flex gap-2 items-center">
+                  <div className="border border-border rounded-md w-full h-[200px]">
+                    <Image
+                      src={preview}
+                      width={400}
+                      height={300}
+                      alt="Selected image"
+                      className="mx-auto p-10"
+                    />
+                  </div>
+                  <Button size="icon-sm">
+                    <ArrowRight className="min-w-8" />
+                  </Button>
+                  <div className="border border-border rounded-md w-full h-[200px]"></div>
+                </div>
+              </>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
     </div>
