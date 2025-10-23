@@ -266,7 +266,12 @@ export default function TranslatorApp() {
     }
   };
 
-  const handleCopyTranslation = () => {
+  const handleCopyTranslatedText = () => {
+    navigator.clipboard.writeText(translatedText);
+    setIsCopied(true);
+  };
+
+  const handleCopyTranslatedDocumentContent = () => {
     navigator.clipboard.writeText(translatedFileContent);
     setIsCopied(true);
   };
@@ -430,7 +435,7 @@ export default function TranslatorApp() {
         </div>
       </div>
 
-      <Tabs defaultValue="document">
+      <Tabs defaultValue="text">
         <div className="md:flex justify-between items-center">
           <TabsList className="my-2">
             <TabsTrigger value="text" className="gap-2">
@@ -509,6 +514,26 @@ export default function TranslatorApp() {
               className="resize-none bg-muted/50 rounded-lg"
             />
           </div>
+          <div className="flex justify-end mt-2">
+            <Button
+              variant="outline"
+              onClick={handleCopyTranslatedText}
+              size="sm"
+              disabled={translatedText.length === 0}
+            >
+              {isCopied ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Clipboard className="h-4 w-4" />
+                  Copy
+                </>
+              )}
+            </Button>
+          </div>
         </TabsContent>
 
         <TabsContent value="document">
@@ -536,7 +561,7 @@ export default function TranslatorApp() {
                     {translatedFileContent ? (
                       <>
                         <Button
-                          onClick={handleCopyTranslation}
+                          onClick={handleCopyTranslatedDocumentContent}
                           size="sm"
                           disabled={translatedFileContent.length === 0}
                         >
