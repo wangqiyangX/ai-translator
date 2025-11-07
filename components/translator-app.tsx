@@ -25,6 +25,7 @@ import {
   ArrowRight,
   Globe,
   RefreshCw,
+  GithubIcon,
 } from "lucide-react";
 import {
   Dialog,
@@ -44,6 +45,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Separator } from "@/components/ui/separator";
 import Image from "next/image";
+import Link from "next/link";
 
 const LANGUAGES = [
   { code: "en", name: "English" /* flag: "🇺🇸" */ },
@@ -345,6 +347,14 @@ export default function TranslatorApp() {
 
         <div className="flex gap-1">
           <ModeToggle />
+          <Button variant="ghost" size="icon">
+            <Link
+              href={"https://github.com/wangqiyangX/ai-translator"}
+              target="_blank"
+            >
+              <GithubIcon className="size-4" />
+            </Link>
+          </Button>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="ghost" size="icon">
@@ -497,24 +507,7 @@ export default function TranslatorApp() {
         </div>
 
         <TabsContent value="text">
-          <div className="grid md:grid-cols-2 gap-2 min-h-[140px]">
-            <Textarea
-              id="source-text"
-              placeholder="Enter text to translate..."
-              value={sourceText}
-              onChange={(e) => setSourceText(e.target.value)}
-              className="resize-none rounded-lg"
-            />
-
-            <Textarea
-              id="translated-text"
-              placeholder="Translation will appear here..."
-              value={translatedText}
-              readOnly
-              className="resize-none bg-muted/50 rounded-lg"
-            />
-          </div>
-          <div className="flex justify-end mt-2">
+          <div className="flex justify-end mb-2">
             <Button
               variant="outline"
               onClick={handleCopyTranslatedText}
@@ -534,11 +527,32 @@ export default function TranslatorApp() {
               )}
             </Button>
           </div>
+          <div className="grid md:grid-cols-2 gap-2 min-h-[140px]">
+            <Textarea
+              id="source-text"
+              placeholder="Enter text to translate..."
+              value={sourceText}
+              onChange={(e) => setSourceText(e.target.value)}
+              className="resize-none rounded-lg"
+            />
+
+            <Textarea
+              id="translated-text"
+              placeholder="Translation will appear here..."
+              value={translatedText}
+              readOnly
+              className="resize-none bg-muted/50 rounded-lg"
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="document">
           <Dropzone
-            accept={{ "text/mdx": [] }}
+            accept={{
+              "text/mdx": [".mdx"],
+              "text/markdown": [".md", ".markdown"],
+              "text/plain": [".txt"],
+            }}
             maxFiles={1}
             onDrop={(files: File[]) => {
               setSelectedDocuments(files);
