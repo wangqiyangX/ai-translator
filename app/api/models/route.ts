@@ -1,3 +1,5 @@
+import { NextResponse } from "next/server"
+
 export const maxDuration = 10
 
 export async function POST(req: Request) {
@@ -5,7 +7,7 @@ export async function POST(req: Request) {
     const { apiKey, baseUrl, model } = await req.json()
 
     if (!model) {
-      return Response.json(
+      return NextResponse.json(
         { available: false, error: "Model is required" },
         { status: 400 }
       )
@@ -30,7 +32,7 @@ export async function POST(req: Request) {
           const errorData = await response.json().catch(() => ({
             error: { message: "Failed to connect to API" },
           }))
-          return Response.json(
+          return NextResponse.json(
             {
               available: false,
               error:
@@ -48,7 +50,7 @@ export async function POST(req: Request) {
         // Check if the specific model is available in the list
         const modelExists = models.some((m: any) => m.id === model)
 
-        return Response.json({
+        return NextResponse.json({
           available: true,
           modelExists,
           message: modelExists
@@ -56,7 +58,7 @@ export async function POST(req: Request) {
             : "API is available, but model may not be in the list",
         })
       } catch (error) {
-        return Response.json(
+        return NextResponse.json(
           {
             available: false,
             error:
@@ -70,14 +72,14 @@ export async function POST(req: Request) {
     } else {
       // Use Vercel AI Gateway - assume available if no API key is provided
       // The gateway will handle the actual connection
-      return Response.json({
+      return NextResponse.json({
         available: true,
         message: "Using Vercel AI Gateway",
       })
     }
   } catch (error) {
     console.error("Model check error:", error)
-    return Response.json(
+    return NextResponse.json(
       {
         available: false,
         error:

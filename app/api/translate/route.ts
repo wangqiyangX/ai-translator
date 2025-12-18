@@ -1,5 +1,6 @@
 import { generateText } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
+import { NextResponse } from "next/server"
 
 export const maxDuration = 30
 
@@ -23,7 +24,7 @@ export async function POST(req: Request) {
     const { text, sourceLang, targetLang, apiKey, baseUrl, model = "gpt-4o-mini" } = await req.json()
 
     if (!text || !sourceLang || !targetLang) {
-      return Response.json({ error: "Missing required fields" }, { status: 400 })
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
     const sourceLangName = LANGUAGE_NAMES[sourceLang] || sourceLang
@@ -55,10 +56,10 @@ ${text}`
       temperature: 0.3,
     })
 
-    return Response.json({ translatedText })
+    return NextResponse.json({ translatedText })
   } catch (error) {
     console.error("Translation error:", error)
-    return Response.json(
+    return NextResponse.json(
       { error: "Translation failed. Please check your API settings and try again." },
       { status: 500 },
     )

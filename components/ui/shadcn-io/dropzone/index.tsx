@@ -1,7 +1,7 @@
 "use client";
 
 import { UploadIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ReactNode, ReactElement } from "react";
 import { createContext, useContext } from "react";
 import type { DropEvent, DropzoneOptions, FileRejection } from "react-dropzone";
 import { useDropzone } from "react-dropzone";
@@ -119,7 +119,7 @@ const maxLabelItems = 3;
 export const DropzoneContent = ({
   children,
   className,
-}: DropzoneContentProps) => {
+}: DropzoneContentProps): ReactElement | null => {
   const { src } = useDropzoneContext();
 
   if (!src) {
@@ -127,7 +127,7 @@ export const DropzoneContent = ({
   }
 
   if (children) {
-    return children;
+    return <>{children}</>;
   }
 
   return (
@@ -157,7 +157,7 @@ export type DropzoneEmptyStateProps = {
 export const DropzoneEmptyState = ({
   children,
   className,
-}: DropzoneEmptyStateProps) => {
+}: DropzoneEmptyStateProps): ReactElement | null => {
   const { src, accept, maxSize, minSize, maxFiles } = useDropzoneContext();
 
   if (src) {
@@ -165,7 +165,7 @@ export const DropzoneEmptyState = ({
   }
 
   if (children) {
-    return children;
+    return <>{children}</>;
   }
 
   let caption = "";
