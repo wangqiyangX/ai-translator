@@ -16,8 +16,17 @@ export async function POST(req: Request) {
     if (apiKey) {
       // Custom API key provided - check using /models endpoint
       // This doesn't consume tokens, just checks connectivity
+      if (!baseUrl) {
+        return NextResponse.json(
+          {
+            available: false,
+            error: "Base URL is required when using custom API key",
+          },
+          { status: 400 }
+        )
+      }
       try {
-        const apiBaseUrl = baseUrl || "https://api.openai.com/v1"
+        const apiBaseUrl = baseUrl
         const modelsUrl = `${apiBaseUrl.replace(/\/$/, "")}/models`
 
         const response = await fetch(modelsUrl, {
