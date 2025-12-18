@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -26,6 +26,8 @@ import {
   Globe,
   RefreshCw,
   GithubIcon,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 import {
   Dialog,
@@ -63,51 +65,34 @@ const LANGUAGES = [
 ];
 
 const MODELS = [
-  { value: "gpt-4o", label: "GPT-4o", provider: "OpenAI" },
-  { value: "gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI" },
-  { value: "gpt-4-turbo", label: "GPT-4 Turbo", provider: "OpenAI" },
-  { value: "gpt-4", label: "GPT-4", provider: "OpenAI" },
-  { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo", provider: "OpenAI" },
+  { value: "gpt-5.2", label: "GPT-5.2", provider: "OpenAI" },
+  { value: "gpt-5.1", label: "GPT-5.1", provider: "OpenAI" },
   {
-    value: "claude-3-5-sonnet-20241022",
-    label: "Claude 3.5 Sonnet",
+    value: "claude-opus-4-5-20251101",
+    label: "Claude Opus 4.5",
     provider: "Anthropic",
   },
   {
-    value: "claude-3-5-haiku-20241022",
-    label: "Claude 3.5 Haiku",
+    value: "claude-sonnet-4-5-20250929",
+    label: "Claude Sonnet 4.5",
     provider: "Anthropic",
   },
   {
-    value: "claude-3-opus-20240229",
-    label: "Claude 3 Opus",
+    value: "claude-haiku-4-5-20251001",
+    label: "Claude Haiku 4.5",
     provider: "Anthropic",
   },
   {
-    value: "gemini-2.0-flash-exp",
-    label: "Gemini 2.0 Flash",
+    value: "gemini-3-pro-preview",
+    label: "Gemini 3 Pro Preview",
     provider: "Google",
   },
   {
-    value: "gemini-1.5-pro-latest",
-    label: "Gemini 1.5 Pro",
+    value: "gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
     provider: "Google",
   },
-  {
-    value: "gemini-1.5-flash-latest",
-    label: "Gemini 1.5 Flash",
-    provider: "Google",
-  },
-  {
-    value: "llama-3.3-70b-versatile",
-    label: "Llama 3.3 70B",
-    provider: "Meta",
-  },
-  {
-    value: "llama-3.1-70b-versatile",
-    label: "Llama 3.1 70B",
-    provider: "Meta",
-  },
+  { value: "custom", label: "Custom", provider: "Custom" },
 ];
 
 interface ApiConfig {
@@ -146,7 +131,12 @@ export default function TranslatorApp() {
     baseUrl: "",
     model: "gpt-4o-mini",
   });
+  const [customModelName, setCustomModelName] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [apiStatus, setApiStatus] = useState<
+    "idle" | "checking" | "available" | "unavailable"
+  >("idle");
+  const [apiStatusMessage, setApiStatusMessage] = useState("");
 
   useEffect(() => {
     const savedConfig = localStorage.getItem(STORAGE_KEY);
@@ -154,7 +144,16 @@ export default function TranslatorApp() {
       try {
         const parsed = JSON.parse(savedConfig);
         setApiConfig(parsed);
-        setTempApiConfig(parsed);
+        // Check if the saved model is a custom model (not in MODELS list)
+        const isCustomModel = !MODELS.some(
+          (m) => m.value === parsed.model && m.value !== "custom"
+        );
+        if (isCustomModel && parsed.model) {
+          setCustomModelName(parsed.model);
+          setTempApiConfig({ ...parsed, model: "custom" });
+        } else {
+          setTempApiConfig(parsed);
+        }
       } catch (error) {
         console.error("Failed to parse saved config:", error);
       }
@@ -170,6 +169,23 @@ export default function TranslatorApp() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(apiConfig));
     }
   }, [apiConfig]);
+
+  // Sync tempApiConfig when dialog opens
+  useEffect(() => {
+    if (dialogOpen) {
+      // Check if the current model is a custom model (not in MODELS list)
+      const isCustomModel = !MODELS.some(
+        (m) => m.value === apiConfig.model && m.value !== "custom"
+      );
+      if (isCustomModel && apiConfig.model) {
+        setCustomModelName(apiConfig.model);
+        setTempApiConfig({ ...apiConfig, model: "custom" });
+      } else {
+        setTempApiConfig(apiConfig);
+        setCustomModelName("");
+      }
+    }
+  }, [dialogOpen, apiConfig]);
 
   useEffect(() => {
     if (!sourceText.trim()) {
@@ -322,13 +338,78 @@ export default function TranslatorApp() {
   };
 
   const handleSaveApiConfig = () => {
-    setApiConfig(tempApiConfig);
+    // If custom model is selected, use the custom model name
+    if (tempApiConfig.model === "custom") {
+      if (!customModelName.trim()) {
+        // Don't save if custom model name is empty
+        return;
+      }
+      setApiConfig({ ...tempApiConfig, model: customModelName.trim() });
+    } else {
+      setApiConfig(tempApiConfig);
+    }
     setDialogOpen(false);
   };
 
   const handleDocumentContent = (value: string) => {
     setSelectedDocumentContent(value);
   };
+
+  const checkApiAvailability = useCallback(async () => {
+    setApiStatus("checking");
+    setApiStatusMessage("Checking API availability...");
+
+    try {
+      // Use /api/models endpoint to check availability without consuming tokens
+      const response = await fetch("/api/models", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          apiKey: apiConfig.apiKey || undefined,
+          baseUrl: apiConfig.baseUrl || undefined,
+          model: apiConfig.model,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.available) {
+        setApiStatus("available");
+        setApiStatusMessage(
+          data.message || "API is available and working correctly"
+        );
+      } else {
+        setApiStatus("unavailable");
+        setApiStatusMessage(data.error || "API request failed");
+      }
+    } catch (error) {
+      setApiStatus("unavailable");
+      setApiStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to connect to API. Please check your settings."
+      );
+    }
+  }, [apiConfig.apiKey, apiConfig.baseUrl, apiConfig.model]);
+
+  // Check API availability when config changes
+  useEffect(() => {
+    if (apiConfig.model) {
+      // Debounce the check
+      const timeoutId = setTimeout(() => {
+        checkApiAvailability();
+      }, 1000);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [
+    apiConfig.model,
+    apiConfig.apiKey,
+    apiConfig.baseUrl,
+    checkApiAvailability,
+  ]);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -431,12 +512,33 @@ export default function TranslatorApp() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {tempApiConfig.model === "custom" && (
+                    <Input
+                      id="custom-model"
+                      placeholder="Input model name, for example: gpt-4, claude-3-opus"
+                      value={customModelName}
+                      onChange={(e) => {
+                        setCustomModelName(e.target.value);
+                        // Update tempApiConfig.model with the custom model name for preview
+                        // but keep the select value as "custom"
+                      }}
+                      className="mt-2"
+                    />
+                  )}
                   <p className="text-sm text-muted-foreground">
-                    Select the model to use for translation.
+                    {tempApiConfig.model === "custom"
+                      ? "Input the model name you want to use."
+                      : "Select the model to use for translation."}
                   </p>
                 </div>
 
-                <Button onClick={handleSaveApiConfig} className="w-full">
+                <Button
+                  onClick={handleSaveApiConfig}
+                  className="w-full"
+                  disabled={
+                    tempApiConfig.model === "custom" && !customModelName.trim()
+                  }
+                >
                   Save Settings
                 </Button>
               </div>
@@ -692,6 +794,76 @@ export default function TranslatorApp() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* api 可用性检测 */}
+      <div className="mt-6 p-4 border rounded-lg bg-card">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {apiStatus === "checking" && (
+                <>
+                  <Spinner className="h-4 w-4" />
+                  <span className="text-sm font-medium">
+                    Checking API status...
+                  </span>
+                </>
+              )}
+              {apiStatus === "available" && (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  <span className="text-sm font-medium text-green-500">
+                    API Available
+                  </span>
+                </>
+              )}
+              {apiStatus === "unavailable" && (
+                <>
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                  <span className="text-sm font-medium text-red-500">
+                    API Unavailable
+                  </span>
+                </>
+              )}
+              {apiStatus === "idle" && (
+                <>
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium text-muted-foreground">
+                    API Status
+                  </span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                Model: {apiConfig.model || "Not set"}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={checkApiAvailability}
+                disabled={apiStatus === "checking"}
+              >
+                {apiStatus === "checking" ? (
+                  <>
+                    <Spinner className="h-3 w-3 mr-2" />
+                    Checking...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-3 w-3 mr-2" />
+                    Test API
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+          {apiStatusMessage && (
+            <div className="text-xs text-muted-foreground">
+              {apiStatusMessage}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
