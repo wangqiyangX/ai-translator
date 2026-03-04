@@ -112,6 +112,7 @@ interface TokenStats extends TokenUsage {
 }
 
 const STORAGE_KEY = "ai-translator-config";
+const TOKEN_STATS_STORAGE_KEY = "ai-translator-token-stats";
 
 export default function TranslatorApp() {
   const [isCopied, setIsCopied] = useState(false);
@@ -194,6 +195,27 @@ export default function TranslatorApp() {
     }
   }, [apiConfig]);
 
+  useEffect(() => {
+    const savedTokenStats = localStorage.getItem(TOKEN_STATS_STORAGE_KEY);
+    if (!savedTokenStats) return;
+
+    try {
+      const parsed = JSON.parse(savedTokenStats) as Partial<TokenStats>;
+      setTokenStats({
+        requests: parsed.requests ?? 0,
+        inputTokens: parsed.inputTokens ?? 0,
+        outputTokens: parsed.outputTokens ?? 0,
+        totalTokens: parsed.totalTokens ?? 0,
+      });
+    } catch (error) {
+      console.error("Failed to parse saved token stats:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(TOKEN_STATS_STORAGE_KEY, JSON.stringify(tokenStats));
+  }, [tokenStats]);
+
   // Sync tempApiConfig when dialog opens
   useEffect(() => {
     if (dialogOpen) {
@@ -246,59 +268,65 @@ export default function TranslatorApp() {
       return;
     }
 
-    textTranslateAbortRef.current?.abort();
-    const controller = new AbortController();
-    textTranslateAbortRef.current = controller;
-    const requestId = ++textRequestIdRef.current;
-
-    setIsTranslating(true);
-
-    try {
-      const response = await fetch("/api/translate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          text: sourceText,
-          sourceLang: requestSourceLang,
-          targetLang: requestTargetLang,
-          apiKey: apiConfig.apiKey || undefined,
-          baseUrl: apiConfig.baseUrl || undefined,
-          model: apiConfig.model,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Translation failed");
-      }
-
-      const data = await response.json();
-      if (requestId === textRequestIdRef.current) {
-        setTranslatedText(data.translatedText);
-        accumulateTokenUsage(data.tokenUsage);
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return;
-      }
-      console.error("Translation error:", error);
-      if (requestId === textRequestIdRef.current) {
-        setTranslatedText(
-          `Error: ${error instanceof Error
-            ? error.message
-            : "Translation failed. Please try again."
-          }`
-        );
-      }
-    } finally {
-      if (requestId === textRequestIdRef.current) {
-        setIsTranslating(false);
-      }
+    if (!apiConfig.apiKey.trim()) {
+      setTranslatedText("Error: Please configure your API key in Settings.");
+      setIsTranslating(false);
+      return;
     }
-  }, [
+
+      textTranslateAbortRef.current?.abort();
+      const controller = new AbortController();
+      textTranslateAbortRef.current = controller;
+      const requestId = ++textRequestIdRef.current;
+
+      setIsTranslating(true);
+
+      try {
+        const response = await fetch("/api/translate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            text: sourceText,
+            sourceLang: requestSourceLang,
+            targetLang: requestTargetLang,
+            apiKey: apiConfig.apiKey || undefined,
+            baseUrl: apiConfig.baseUrl || undefined,
+            model: apiConfig.model,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Translation failed");
+        }
+
+        const data = await response.json();
+        if (requestId === textRequestIdRef.current) {
+          setTranslatedText(data.translatedText);
+          accumulateTokenUsage(data.tokenUsage);
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        console.error("Translation error:", error);
+        if (requestId === textRequestIdRef.current) {
+          setTranslatedText(
+            `Error: ${error instanceof Error
+              ? error.message
+              : "Translation failed. Please try again."
+            }`
+          );
+        }
+      } finally {
+        if (requestId === textRequestIdRef.current) {
+          setIsTranslating(false);
+        }
+      }
+    }, [
     accumulateTokenUsage,
     sourceText,
     sourceLang,
@@ -312,6 +340,7 @@ export default function TranslatorApp() {
     async (text: string) => {
       const trimmedText = text.trim();
       if (!trimmedText) return null;
+      if (!apiConfig.apiKey.trim()) return null;
 
       languageDetectAbortRef.current?.abort();
       const controller = new AbortController();
@@ -413,6 +442,10 @@ export default function TranslatorApp() {
 
   const handleFileTranslate = async () => {
     if (!selectedDocuments?.[0]) return;
+    if (!apiConfig.apiKey.trim()) {
+      setTranslatedFileContent("Error: Please configure your API key in Settings.");
+      return;
+    }
 
     setIsTranslatingFile(true);
     setTranslatedFileContent("");
@@ -455,6 +488,10 @@ export default function TranslatorApp() {
 
   const handleImageTranslate = async () => {
     if (!selectedImages?.[0]) return;
+    if (!apiConfig.apiKey.trim()) {
+      setTranslatedImageContent("Error: Please configure your API key in Settings.");
+      return;
+    }
 
     setIsTranslatingImage(true);
     setTranslatedImageContent("");
@@ -776,105 +813,6 @@ export default function TranslatorApp() {
         </div>
       </div>
 
-      {/* api 可用性检测 */}
-      <div className="mb-4 p-4 border rounded-lg bg-card">
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {apiStatus === "checking" && (
-                <>
-                  <Spinner className="h-4 w-4" />
-                  <span className="text-sm font-medium">
-                    Checking API status...
-                  </span>
-                </>
-              )}
-              {apiStatus === "available" && (
-                <>
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  <span className="text-sm font-medium text-green-500">
-                    API Available
-                  </span>
-                </>
-              )}
-              {apiStatus === "unavailable" && (
-                <>
-                  <AlertCircle className="h-4 w-4 text-red-500" />
-                  <span className="text-sm font-medium text-red-500">
-                    API Unavailable
-                  </span>
-                </>
-              )}
-              {apiStatus === "idle" && (
-                <>
-                  <Globe className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium text-muted-foreground">
-                    API Status
-                  </span>
-                </>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                Model: {apiConfig.model || "Not set"}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={checkApiAvailability}
-                disabled={apiStatus === "checking"}
-              >
-                {apiStatus === "checking" ? (
-                  <>
-                    <Spinner className="h-3 w-3 mr-2" />
-                    Checking...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-3 w-3 mr-2" />
-                    Test API
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-          {apiStatusMessage && (
-            <div className="text-xs text-muted-foreground">
-              {apiStatusMessage}
-            </div>
-          )}
-          <div className="pt-2 border-t">
-            <div className="text-xs text-muted-foreground mb-2">
-              Token Usage (Current Session)
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-              <div className="rounded-md border p-2 bg-background/50">
-                <div className="text-muted-foreground">Requests</div>
-                <div className="font-medium">{tokenStats.requests}</div>
-              </div>
-              <div className="rounded-md border p-2 bg-background/50">
-                <div className="text-muted-foreground">Input Tokens</div>
-                <div className="font-medium">
-                  {tokenStats.inputTokens.toLocaleString()}
-                </div>
-              </div>
-              <div className="rounded-md border p-2 bg-background/50">
-                <div className="text-muted-foreground">Output Tokens</div>
-                <div className="font-medium">
-                  {tokenStats.outputTokens.toLocaleString()}
-                </div>
-              </div>
-              <div className="rounded-md border p-2 bg-background/50">
-                <div className="text-muted-foreground">Total Tokens</div>
-                <div className="font-medium">
-                  {tokenStats.totalTokens.toLocaleString()}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <Tabs defaultValue="text">
         <div className="md:flex justify-between items-center">
           <TabsList className="my-2">
@@ -937,7 +875,7 @@ export default function TranslatorApp() {
         </div>
 
         <TabsContent value="text">
-          <div className="grid md:grid-cols-2 gap-2 min-h-[140px]">
+          <div className="grid md:grid-cols-2 gap-2 min-h-[240px]">
             <Textarea
               id="source-text"
               placeholder="Enter text to translate..."
@@ -955,7 +893,7 @@ export default function TranslatorApp() {
             />
           </div>
 
-          <div className="flex justify-end mt-2">
+          <div className="flex justify-end my-2">
             <Button
               variant="outline"
               onClick={handleCopyTranslatedText}
@@ -1141,6 +1079,105 @@ export default function TranslatorApp() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* api 可用性检测 */}
+      <div className="mb-4 p-4 border rounded-lg bg-card">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {apiStatus === "checking" && (
+                <>
+                  <Spinner className="h-4 w-4" />
+                  <span className="text-sm font-medium">
+                    Checking API status...
+                  </span>
+                </>
+              )}
+              {apiStatus === "available" && (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  <span className="text-sm font-medium text-green-500">
+                    API Available
+                  </span>
+                </>
+              )}
+              {apiStatus === "unavailable" && (
+                <>
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                  <span className="text-sm font-medium text-red-500">
+                    API Unavailable
+                  </span>
+                </>
+              )}
+              {apiStatus === "idle" && (
+                <>
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium text-muted-foreground">
+                    API Status
+                  </span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                Model: {apiConfig.model || "Not set"}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={checkApiAvailability}
+                disabled={apiStatus === "checking"}
+              >
+                {apiStatus === "checking" ? (
+                  <>
+                    <Spinner className="h-3 w-3 mr-2" />
+                    Checking...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-3 w-3 mr-2" />
+                    Test API
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+          {apiStatusMessage && (
+            <div className="text-xs text-muted-foreground">
+              {apiStatusMessage}
+            </div>
+          )}
+          <div className="pt-2 border-t">
+            <div className="text-xs text-muted-foreground mb-2">
+              Token Usage (Current Session)
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+              <div className="rounded-md border p-2 bg-background/50">
+                <div className="text-muted-foreground">Requests</div>
+                <div className="font-medium">{tokenStats.requests}</div>
+              </div>
+              <div className="rounded-md border p-2 bg-background/50">
+                <div className="text-muted-foreground">Input Tokens</div>
+                <div className="font-medium">
+                  {tokenStats.inputTokens.toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-md border p-2 bg-background/50">
+                <div className="text-muted-foreground">Output Tokens</div>
+                <div className="font-medium">
+                  {tokenStats.outputTokens.toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-md border p-2 bg-background/50">
+                <div className="text-muted-foreground">Total Tokens</div>
+                <div className="font-medium">
+                  {tokenStats.totalTokens.toLocaleString()}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

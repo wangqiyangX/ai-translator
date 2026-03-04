@@ -1,6 +1,7 @@
 import { generateText } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
 import { NextResponse } from "next/server"
+import { guardApiRoute } from "@/lib/api-security"
 
 export const maxDuration = 15
 
@@ -32,6 +33,15 @@ export async function POST(req: Request) {
     if (!text || typeof text !== "string") {
       return NextResponse.json({ error: "Text is required" }, { status: 400 })
     }
+
+    const guard = guardApiRoute({
+      headers: req.headers,
+      apiKey,
+      routeKey: "detect-language",
+      ipLimitPerMinute: 120,
+      userLimitPerMinute: 240,
+    })
+    if (!guard.ok) return guard.response
 
     const prompt = `Identify the primary language of the following text.
 Return ONLY one language code from this list:

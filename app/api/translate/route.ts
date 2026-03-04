@@ -1,6 +1,7 @@
 import { generateText } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
 import { NextResponse } from "next/server"
+import { guardApiRoute } from "@/lib/api-security"
 
 export const maxDuration = 30
 
@@ -40,6 +41,15 @@ export async function POST(req: Request) {
     if (!text || !sourceLang || !targetLang) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
+
+    const guard = guardApiRoute({
+      headers: req.headers,
+      apiKey,
+      routeKey: "translate",
+      ipLimitPerMinute: 100,
+      userLimitPerMinute: 200,
+    })
+    if (!guard.ok) return guard.response
 
     const sourceLangName = LANGUAGE_NAMES[sourceLang] || sourceLang
     const targetLangName = LANGUAGE_NAMES[targetLang] || targetLang

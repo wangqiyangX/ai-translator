@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { generateText } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
+import { guardApiRoute } from "@/lib/api-security"
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024
 
@@ -51,6 +52,15 @@ export async function POST(request: NextRequest) {
     if (!sourceLang || !targetLang) {
       return NextResponse.json({ error: "Source and target languages are required" }, { status: 400 })
     }
+
+    const guard = guardApiRoute({
+      headers: request.headers,
+      apiKey,
+      routeKey: "translate-file",
+      ipLimitPerMinute: 40,
+      userLimitPerMinute: 80,
+    })
+    if (!guard.ok) return guard.response
 
     if (file.size > MAX_FILE_SIZE_BYTES) {
       return NextResponse.json(
