@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -101,6 +101,16 @@ interface ApiConfig {
   model: string;
 }
 
+interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+interface TokenStats extends TokenUsage {
+  requests: number;
+}
+
 const STORAGE_KEY = "ai-translator-config";
 
 export default function TranslatorApp() {
@@ -119,7 +129,15 @@ export default function TranslatorApp() {
   const [preview, setPreview] = useState<string | null>(null);
   const [translatedFileContent, setTranslatedFileContent] = useState("");
   const [isTranslatingFile, setIsTranslatingFile] = useState(false);
+  const [translatedImageContent, setTranslatedImageContent] = useState("");
+  const [isTranslatingImage, setIsTranslatingImage] = useState(false);
   const [selectedDocumentContent, setSelectedDocumentContent] = useState("");
+  const textTranslateAbortRef = useRef<AbortController | null>(null);
+  const textRequestIdRef = useRef(0);
+  const languageDetectAbortRef = useRef<AbortController | null>(null);
+  const detectRequestIdRef = useRef(0);
+  const sourceLangRef = useRef(sourceLang);
+  const skipNextLangChangeTranslateRef = useRef(false);
 
   const [apiConfig, setApiConfig] = useState<ApiConfig>({
     apiKey: "",
@@ -137,6 +155,12 @@ export default function TranslatorApp() {
     "idle" | "checking" | "available" | "unavailable"
   >("idle");
   const [apiStatusMessage, setApiStatusMessage] = useState("");
+  const [tokenStats, setTokenStats] = useState<TokenStats>({
+    requests: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  });
 
   useEffect(() => {
     const savedConfig = localStorage.getItem(STORAGE_KEY);
@@ -188,23 +212,46 @@ export default function TranslatorApp() {
   }, [dialogOpen, apiConfig]);
 
   useEffect(() => {
-    if (!sourceText.trim()) {
-      setTranslatedText("");
+    sourceLangRef.current = sourceLang;
+  }, [sourceLang]);
+
+  const accumulateTokenUsage = useCallback((usage?: Partial<TokenUsage>) => {
+    if (!usage) return;
+
+    const inputTokens = usage.inputTokens ?? 0;
+    const outputTokens = usage.outputTokens ?? 0;
+    const totalTokens = usage.totalTokens ?? inputTokens + outputTokens;
+
+    if (inputTokens === 0 && outputTokens === 0 && totalTokens === 0) {
       return;
     }
 
-    const timeoutId = setTimeout(() => {
-      handleTranslate();
-    }, 800); // Wait 800ms after user stops typing
+    setTokenStats((prev) => ({
+      requests: prev.requests + 1,
+      inputTokens: prev.inputTokens + inputTokens,
+      outputTokens: prev.outputTokens + outputTokens,
+      totalTokens: prev.totalTokens + totalTokens,
+    }));
+  }, []);
 
-    return () => clearTimeout(timeoutId);
-  }, [sourceText, sourceLang, targetLang]);
+  const handleTranslate = useCallback(
+    async (sourceLangOverride?: string, targetLangOverride?: string) => {
+    const requestSourceLang = sourceLangOverride || sourceLang;
+    const requestTargetLang = targetLangOverride || targetLang;
 
-  const handleTranslate = async () => {
-    if (!sourceText.trim()) return;
+    if (!sourceText.trim()) {
+      textTranslateAbortRef.current?.abort();
+      setTranslatedText("");
+      setIsTranslating(false);
+      return;
+    }
+
+    textTranslateAbortRef.current?.abort();
+    const controller = new AbortController();
+    textTranslateAbortRef.current = controller;
+    const requestId = ++textRequestIdRef.current;
 
     setIsTranslating(true);
-    setTranslatedText("");
 
     try {
       const response = await fetch("/api/translate", {
@@ -212,10 +259,11 @@ export default function TranslatorApp() {
         headers: {
           "Content-Type": "application/json",
         },
+        signal: controller.signal,
         body: JSON.stringify({
           text: sourceText,
-          sourceLang,
-          targetLang,
+          sourceLang: requestSourceLang,
+          targetLang: requestTargetLang,
           apiKey: apiConfig.apiKey || undefined,
           baseUrl: apiConfig.baseUrl || undefined,
           model: apiConfig.model,
@@ -228,23 +276,143 @@ export default function TranslatorApp() {
       }
 
       const data = await response.json();
-      setTranslatedText(data.translatedText);
+      if (requestId === textRequestIdRef.current) {
+        setTranslatedText(data.translatedText);
+        accumulateTokenUsage(data.tokenUsage);
+      }
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
       console.error("Translation error:", error);
-      setTranslatedText(
-        `Error: ${
-          error instanceof Error
+      if (requestId === textRequestIdRef.current) {
+        setTranslatedText(
+          `Error: ${error instanceof Error
             ? error.message
             : "Translation failed. Please try again."
-        }`
-      );
+          }`
+        );
+      }
     } finally {
-      setIsTranslating(false);
+      if (requestId === textRequestIdRef.current) {
+        setIsTranslating(false);
+      }
     }
-  };
+  }, [
+    accumulateTokenUsage,
+    sourceText,
+    sourceLang,
+    targetLang,
+    apiConfig.apiKey,
+    apiConfig.baseUrl,
+    apiConfig.model,
+  ]);
+
+  const detectSourceLanguage = useCallback(
+    async (text: string) => {
+      const trimmedText = text.trim();
+      if (!trimmedText) return null;
+
+      languageDetectAbortRef.current?.abort();
+      const controller = new AbortController();
+      languageDetectAbortRef.current = controller;
+      const requestId = ++detectRequestIdRef.current;
+
+      try {
+        const response = await fetch("/api/detect-language", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            text: trimmedText,
+            apiKey: apiConfig.apiKey || undefined,
+            baseUrl: apiConfig.baseUrl || undefined,
+            model: apiConfig.model,
+          }),
+        });
+
+        if (!response.ok) {
+          return null;
+        }
+
+        const data = await response.json();
+        accumulateTokenUsage(data.tokenUsage);
+        if (requestId !== detectRequestIdRef.current) return null;
+        return typeof data.language === "string" ? data.language : null;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return null;
+        }
+        return null;
+      }
+    },
+    [accumulateTokenUsage, apiConfig.apiKey, apiConfig.baseUrl, apiConfig.model]
+  );
+
+  useEffect(() => {
+    if (!sourceText.trim()) {
+      textTranslateAbortRef.current?.abort();
+      languageDetectAbortRef.current?.abort();
+      setTranslatedText("");
+      setIsTranslating(false);
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      void (async () => {
+        const detectedLanguage = await detectSourceLanguage(sourceText);
+
+        if (detectedLanguage && detectedLanguage !== sourceLangRef.current) {
+          const previousSourceLang = sourceLangRef.current;
+          const nextTargetLang =
+            detectedLanguage === targetLang
+              ? previousSourceLang !== detectedLanguage
+                ? previousSourceLang
+                : LANGUAGES.find((lang) => lang.code !== detectedLanguage)?.code || "en"
+              : targetLang;
+
+          skipNextLangChangeTranslateRef.current = true;
+          setSourceLang(detectedLanguage);
+          if (nextTargetLang !== targetLang) {
+            setTargetLang(nextTargetLang);
+          }
+          await handleTranslate(detectedLanguage, nextTargetLang);
+          return;
+        }
+
+        await handleTranslate();
+      })();
+    }, 800);
+
+    return () => clearTimeout(timeoutId);
+  }, [sourceText, targetLang, detectSourceLanguage, handleTranslate]);
+
+  useEffect(() => {
+    if (!sourceText.trim()) return;
+
+    if (skipNextLangChangeTranslateRef.current) {
+      skipNextLangChangeTranslateRef.current = false;
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      void handleTranslate();
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [sourceLang, targetLang, sourceText, handleTranslate]);
+
+  useEffect(() => {
+    return () => {
+      textTranslateAbortRef.current?.abort();
+      languageDetectAbortRef.current?.abort();
+    };
+  }, []);
 
   const handleFileTranslate = async () => {
-    if (!selectedDocuments) return;
+    if (!selectedDocuments?.[0]) return;
 
     setIsTranslatingFile(true);
     setTranslatedFileContent("");
@@ -252,6 +420,7 @@ export default function TranslatorApp() {
     try {
       const formData = new FormData();
       formData.append("file", selectedDocuments[0]);
+      formData.append("textContent", selectedDocumentContent);
       formData.append("sourceLang", sourceLang);
       formData.append("targetLang", targetLang);
       formData.append("model", apiConfig.model);
@@ -270,17 +439,58 @@ export default function TranslatorApp() {
 
       const data = await response.json();
       setTranslatedFileContent(data.translatedContent);
+      accumulateTokenUsage(data.tokenUsage);
     } catch (error) {
       console.error("File translation error:", error);
       setTranslatedFileContent(
-        `Error: ${
-          error instanceof Error
-            ? error.message
-            : "File translation failed. Please try again."
+        `Error: ${error instanceof Error
+          ? error.message
+          : "File translation failed. Please try again."
         }`
       );
     } finally {
       setIsTranslatingFile(false);
+    }
+  };
+
+  const handleImageTranslate = async () => {
+    if (!selectedImages?.[0]) return;
+
+    setIsTranslatingImage(true);
+    setTranslatedImageContent("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedImages[0]);
+      formData.append("sourceLang", sourceLang);
+      formData.append("targetLang", targetLang);
+      formData.append("model", apiConfig.model);
+      if (apiConfig.apiKey) formData.append("apiKey", apiConfig.apiKey);
+      if (apiConfig.baseUrl) formData.append("baseUrl", apiConfig.baseUrl);
+
+      const response = await fetch("/api/translate-image", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Image translation failed");
+      }
+
+      const data = await response.json();
+      setTranslatedImageContent(data.translatedText || "");
+      accumulateTokenUsage(data.tokenUsage);
+    } catch (error) {
+      console.error("Image translation error:", error);
+      setTranslatedImageContent(
+        `Error: ${error instanceof Error
+          ? error.message
+          : "Image translation failed. Please try again."
+        }`
+      );
+    } finally {
+      setIsTranslatingImage(false);
     }
   };
 
@@ -303,13 +513,20 @@ export default function TranslatorApp() {
 
   useEffect(() => {
     setTranslatedFileContent("");
-    getDocumentContent();
+    const loadDocumentContent = async () => {
+      const content = (await selectedDocuments?.[0].text()) ?? "";
+      setSelectedDocumentContent(content);
+    };
+    loadDocumentContent();
   }, [selectedDocuments]);
 
-  const getDocumentContent = async () => {
-    const content = (await selectedDocuments?.[0].text()) ?? "";
-    setSelectedDocumentContent(content);
-  };
+  useEffect(() => {
+    return () => {
+      if (preview) {
+        URL.revokeObjectURL(preview);
+      }
+    };
+  }, [preview]);
 
   const handleDownloadTranslation = () => {
     if (!translatedFileContent || !selectedDocuments) return;
@@ -351,11 +568,15 @@ export default function TranslatorApp() {
     setDialogOpen(false);
   };
 
-  const handleDocumentContent = (value: string) => {
-    setSelectedDocumentContent(value);
-  };
-
   const checkApiAvailability = useCallback(async () => {
+    if (!apiConfig.apiKey) {
+      setApiStatus("idle");
+      setApiStatusMessage(
+        "No custom API configured. Enter an API key to test API availability."
+      );
+      return;
+    }
+
     setApiStatus("checking");
     setApiStatusMessage("Checking API availability...");
 
@@ -396,6 +617,14 @@ export default function TranslatorApp() {
 
   // Check API availability when config changes
   useEffect(() => {
+    if (!apiConfig.apiKey) {
+      setApiStatus("idle");
+      setApiStatusMessage(
+        "No custom API configured. Enter an API key to test API availability."
+      );
+      return;
+    }
+
     if (apiConfig.model) {
       // Debounce the check
       const timeoutId = setTimeout(() => {
@@ -466,8 +695,8 @@ export default function TranslatorApp() {
                     }
                   />
                   <p className="text-sm text-muted-foreground">
-                    Optional. Your API key is stored locally and never sent to
-                    our servers.
+                    Optional. Your API key is stored locally and only sent to
+                    this app&apos;s server endpoints to perform translation.
                   </p>
                 </div>
 
@@ -547,256 +776,8 @@ export default function TranslatorApp() {
         </div>
       </div>
 
-      <Tabs defaultValue="text">
-        <div className="md:flex justify-between items-center">
-          <TabsList className="my-2">
-            <TabsTrigger value="text" className="gap-2">
-              <TextIcon className="h-4 w-4" />
-              Text
-            </TabsTrigger>
-            <TabsTrigger value="document" className="gap-2">
-              <FileText className="h-4 w-4" />
-              Document
-            </TabsTrigger>
-            <TabsTrigger value="image" className="gap-2">
-              <ImageIcon className="h-4 w-4" />
-              Image
-            </TabsTrigger>
-          </TabsList>
-
-          <div className="flex gap-1 my-2">
-            <Select value={sourceLang} onValueChange={setSourceLang}>
-              <SelectTrigger id="source-lang" className="w-full" size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {LANGUAGES.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code}>
-                    <span className="flex items-center gap-2">
-                      {/* <span>{lang.flag}</span> */}
-                      <span>{lang.name}</span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Button
-              onClick={handleSwapLanguages}
-              variant="ghost"
-              size="sm"
-              disabled={isTranslating}
-            >
-              <ArrowRightLeft className="h-4 w-4" />
-            </Button>
-
-            <Select value={targetLang} onValueChange={setTargetLang}>
-              <SelectTrigger id="target-lang" className="w-full" size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {LANGUAGES.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code}>
-                    <span className="flex items-center gap-2">
-                      {/* <span>{lang.flag}</span> */}
-                      <span>{lang.name}</span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <TabsContent value="text">
-          <div className="flex justify-end mb-2">
-            <Button
-              variant="outline"
-              onClick={handleCopyTranslatedText}
-              size="sm"
-              disabled={translatedText.length === 0}
-            >
-              {isCopied ? (
-                <>
-                  <Check className="h-4 w-4" />
-                  Copied
-                </>
-              ) : (
-                <>
-                  <Clipboard className="h-4 w-4" />
-                  Copy
-                </>
-              )}
-            </Button>
-          </div>
-          <div className="grid md:grid-cols-2 gap-2 min-h-[140px]">
-            <Textarea
-              id="source-text"
-              placeholder="Enter text to translate..."
-              value={sourceText}
-              onChange={(e) => setSourceText(e.target.value)}
-              className="resize-none rounded-lg"
-            />
-
-            <Textarea
-              id="translated-text"
-              placeholder="Translation will appear here..."
-              value={translatedText}
-              readOnly
-              className="resize-none bg-muted/50 rounded-lg"
-            />
-          </div>
-        </TabsContent>
-
-        <TabsContent value="document">
-          <Dropzone
-            accept={{
-              "text/mdx": [".mdx"],
-              "text/markdown": [".md", ".markdown"],
-              "text/plain": [".txt"],
-            }}
-            maxFiles={1}
-            onDrop={(files: File[]) => {
-              setSelectedDocuments(files);
-            }}
-            onError={console.error}
-            src={selectedDocuments}
-            className="min-h-[140px]"
-          >
-            <DropzoneEmptyState />
-            <DropzoneContent />
-          </Dropzone>
-
-          {selectedDocuments && (
-            <>
-              <Separator className="my-4" />
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="file-translation">Translated Content</Label>
-                  <div className="flex gap-2 items-center">
-                    {translatedFileContent ? (
-                      <>
-                        <Button
-                          onClick={handleCopyTranslatedDocumentContent}
-                          size="sm"
-                          disabled={translatedFileContent.length === 0}
-                        >
-                          {isCopied ? (
-                            <>
-                              <Check className="h-4 w-4" />
-                              Copied
-                            </>
-                          ) : (
-                            <>
-                              <Clipboard className="h-4 w-4" />
-                              Copy
-                            </>
-                          )}
-                        </Button>
-                        <Button
-                          onClick={handleDownloadTranslation}
-                          variant="outline"
-                          size="sm"
-                          disabled={translatedFileContent.length === 0}
-                        >
-                          <Download />
-                        </Button>
-                        <Button
-                          onClick={handleTranslate}
-                          variant="outline"
-                          size="sm"
-                          disabled={isTranslatingFile || !selectedDocuments}
-                        >
-                          {isTranslating ? <Spinner /> : <RefreshCw />}
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        onClick={handleFileTranslate}
-                        disabled={isTranslatingFile || !selectedDocuments}
-                        size="sm"
-                      >
-                        {isTranslatingFile ? (
-                          <>
-                            <Spinner className="size-4" />
-                            Translating...
-                          </>
-                        ) : (
-                          <>
-                            <Languages />
-                            Translate
-                          </>
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                <div className="grid md:grid-cols-2 gap-2 min-h-[140px]">
-                  <Textarea
-                    id="file-raw-content"
-                    value={selectedDocumentContent}
-                    onChange={(e) => setSelectedDocumentContent(e.target.value)}
-                    className="h-full min-h-[400px] resize-none font-mono text-sm"
-                  />
-                  <Textarea
-                    id="file-translated-content"
-                    value={translatedFileContent}
-                    readOnly
-                    className="h-full min-h-[400px] resize-none bg-muted/50 font-mono text-sm"
-                  />
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {translatedFileContent.length} characters
-                </p>
-              </div>
-            </>
-          )}
-        </TabsContent>
-
-        <TabsContent value="image">
-          <Dropzone
-            accept={{ "image/*": [] }}
-            maxFiles={1}
-            onDrop={(files: File[]) => {
-              console.log(files);
-              setSelectedImages(files);
-              const imageUrl = URL.createObjectURL(files[0]);
-              setPreview(imageUrl);
-            }}
-            onError={console.error}
-            src={selectedImages}
-            className="min-h-[140px]"
-          >
-            <DropzoneEmptyState />
-            <DropzoneContent />
-          </Dropzone>
-          <div className="space-y-2">
-            {preview && (
-              <>
-                <Separator className="my-4" />
-                <div className="flex gap-2 items-center">
-                  <div className="border border-border rounded-md w-full h-[200px] overflow-hidden flex items-center justify-center p-4">
-                    <Image
-                      src={preview || "/placeholder.svg"}
-                      width={400}
-                      height={300}
-                      alt="Selected image"
-                      className="max-w-full max-h-full object-contain"
-                    />
-                  </div>
-                  <Button size="icon-sm">
-                    <ArrowRight className="min-w-8" />
-                  </Button>
-                  <div className="border border-border rounded-md w-full h-[200px]"></div>
-                </div>
-              </>
-            )}
-          </div>
-        </TabsContent>
-      </Tabs>
-
       {/* api 可用性检测 */}
-      <div className="mt-6 p-4 border rounded-lg bg-card">
+      <div className="mb-4 p-4 border rounded-lg bg-card">
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -862,8 +843,304 @@ export default function TranslatorApp() {
               {apiStatusMessage}
             </div>
           )}
+          <div className="pt-2 border-t">
+            <div className="text-xs text-muted-foreground mb-2">
+              Token Usage (Current Session)
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+              <div className="rounded-md border p-2 bg-background/50">
+                <div className="text-muted-foreground">Requests</div>
+                <div className="font-medium">{tokenStats.requests}</div>
+              </div>
+              <div className="rounded-md border p-2 bg-background/50">
+                <div className="text-muted-foreground">Input Tokens</div>
+                <div className="font-medium">
+                  {tokenStats.inputTokens.toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-md border p-2 bg-background/50">
+                <div className="text-muted-foreground">Output Tokens</div>
+                <div className="font-medium">
+                  {tokenStats.outputTokens.toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-md border p-2 bg-background/50">
+                <div className="text-muted-foreground">Total Tokens</div>
+                <div className="font-medium">
+                  {tokenStats.totalTokens.toLocaleString()}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+
+      <Tabs defaultValue="text">
+        <div className="md:flex justify-between items-center">
+          <TabsList className="my-2">
+            <TabsTrigger value="text" className="gap-2">
+              <TextIcon className="h-4 w-4" />
+              Text
+            </TabsTrigger>
+            <TabsTrigger value="document" className="gap-2">
+              <FileText className="h-4 w-4" />
+              Document
+            </TabsTrigger>
+            <TabsTrigger value="image" className="gap-2">
+              <ImageIcon className="h-4 w-4" />
+              Image
+            </TabsTrigger>
+          </TabsList>
+
+          <div className="flex gap-1 my-2">
+            <Select value={sourceLang} onValueChange={setSourceLang}>
+              <SelectTrigger id="source-lang" className="w-full" size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LANGUAGES.map((lang) => (
+                  <SelectItem key={lang.code} value={lang.code}>
+                    <span className="flex items-center gap-2">
+                      {/* <span>{lang.flag}</span> */}
+                      <span>{lang.name}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Button
+              onClick={handleSwapLanguages}
+              variant="ghost"
+              size="sm"
+              disabled={isTranslating}
+            >
+              <ArrowRightLeft className="h-4 w-4" />
+            </Button>
+
+            <Select value={targetLang} onValueChange={setTargetLang}>
+              <SelectTrigger id="target-lang" className="w-full" size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LANGUAGES.map((lang) => (
+                  <SelectItem key={lang.code} value={lang.code}>
+                    <span className="flex items-center gap-2">
+                      {/* <span>{lang.flag}</span> */}
+                      <span>{lang.name}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <TabsContent value="text">
+          <div className="grid md:grid-cols-2 gap-2 min-h-[140px]">
+            <Textarea
+              id="source-text"
+              placeholder="Enter text to translate..."
+              value={sourceText}
+              onChange={(e) => setSourceText(e.target.value)}
+              className="resize-none rounded-lg"
+            />
+
+            <Textarea
+              id="translated-text"
+              placeholder="Translation will appear here..."
+              value={translatedText}
+              readOnly
+              className="resize-none bg-muted/50 rounded-lg"
+            />
+          </div>
+
+          <div className="flex justify-end mt-2">
+            <Button
+              variant="outline"
+              onClick={handleCopyTranslatedText}
+              size="sm"
+              disabled={translatedText.length === 0}
+            >
+              {isCopied ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Clipboard className="h-4 w-4" />
+                  Copy
+                </>
+              )}
+            </Button>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="document">
+          <Dropzone
+            accept={{
+              "text/mdx": [".mdx"],
+              "text/markdown": [".md", ".markdown"],
+              "text/plain": [".txt"],
+            }}
+            maxFiles={1}
+            onDrop={(files: File[]) => {
+              setSelectedDocuments(files);
+            }}
+            onError={console.error}
+            src={selectedDocuments}
+            className="min-h-[140px]"
+          >
+            <DropzoneEmptyState />
+            <DropzoneContent />
+          </Dropzone>
+
+          {selectedDocuments && (
+            <>
+              <Separator className="my-4" />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="file-translation">Translated Content</Label>
+                  <div className="flex gap-2 items-center">
+                    {translatedFileContent ? (
+                      <>
+                        <Button
+                          onClick={handleCopyTranslatedDocumentContent}
+                          size="sm"
+                          disabled={translatedFileContent.length === 0}
+                        >
+                          {isCopied ? (
+                            <>
+                              <Check className="h-4 w-4" />
+                              Copied
+                            </>
+                          ) : (
+                            <>
+                              <Clipboard className="h-4 w-4" />
+                              Copy
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          onClick={handleDownloadTranslation}
+                          variant="outline"
+                          size="sm"
+                          disabled={translatedFileContent.length === 0}
+                        >
+                          <Download />
+                        </Button>
+                        <Button
+                          onClick={handleFileTranslate}
+                          variant="outline"
+                          size="sm"
+                          disabled={isTranslatingFile || !selectedDocuments}
+                        >
+                          {isTranslatingFile ? <Spinner /> : <RefreshCw />}
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        onClick={handleFileTranslate}
+                        disabled={isTranslatingFile || !selectedDocuments}
+                        size="sm"
+                      >
+                        {isTranslatingFile ? (
+                          <>
+                            <Spinner className="size-4" />
+                            Translating...
+                          </>
+                        ) : (
+                          <>
+                            <Languages />
+                            Translate
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="grid md:grid-cols-2 gap-2 min-h-[140px]">
+                  <Textarea
+                    id="file-raw-content"
+                    value={selectedDocumentContent}
+                    onChange={(e) => setSelectedDocumentContent(e.target.value)}
+                    className="h-full min-h-[400px] resize-none font-mono text-sm"
+                  />
+                  <Textarea
+                    id="file-translated-content"
+                    value={translatedFileContent}
+                    readOnly
+                    className="h-full min-h-[400px] resize-none bg-muted/50 font-mono text-sm"
+                  />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {translatedFileContent.length} characters
+                </p>
+              </div>
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="image">
+          <Dropzone
+            accept={{ "image/*": [] }}
+            maxFiles={1}
+            onDrop={(files: File[]) => {
+              setSelectedImages(files);
+              setTranslatedImageContent("");
+              if (preview) {
+                URL.revokeObjectURL(preview);
+              }
+              const imageUrl = URL.createObjectURL(files[0]);
+              setPreview(imageUrl);
+            }}
+            onError={console.error}
+            src={selectedImages}
+            className="min-h-[140px]"
+          >
+            <DropzoneEmptyState />
+            <DropzoneContent />
+          </Dropzone>
+          <div className="space-y-2">
+            {preview && (
+              <>
+                <Separator className="my-4" />
+                <div className="flex gap-2 items-center">
+                  <div className="border border-border rounded-md w-full h-[200px] overflow-hidden flex items-center justify-center p-4">
+                    <Image
+                      src={preview || "/placeholder.svg"}
+                      width={400}
+                      height={300}
+                      alt="Selected image"
+                      className="max-w-full max-h-full object-contain"
+                    />
+                  </div>
+                  <Button
+                    size="icon-sm"
+                    onClick={handleImageTranslate}
+                    disabled={isTranslatingImage || !selectedImages?.[0]}
+                  >
+                    {isTranslatingImage ? (
+                      <Spinner className="size-4" />
+                    ) : (
+                      <ArrowRight className="min-w-8" />
+                    )}
+                  </Button>
+                  <div className="border border-border rounded-md w-full h-[200px] p-3">
+                    <Textarea
+                      value={translatedImageContent}
+                      readOnly
+                      placeholder="Translated text will appear here..."
+                      className="h-full resize-none bg-muted/50 text-sm"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -2,6 +2,22 @@ import { type NextRequest, NextResponse } from "next/server"
 import { generateText } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
 
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024
+
+interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+
+function normalizeTokenUsage(usage: Partial<TokenUsage> | undefined): TokenUsage {
+  return {
+    inputTokens: usage?.inputTokens ?? 0,
+    outputTokens: usage?.outputTokens ?? 0,
+    totalTokens: usage?.totalTokens ?? 0,
+  }
+}
+
 const LANGUAGE_NAMES: Record<string, string> = {
   en: "English",
   es: "Spanish",
@@ -25,6 +41,7 @@ export async function POST(request: NextRequest) {
     const targetLang = formData.get("targetLang") as string
     const apiKey = formData.get("apiKey") as string | null
     const baseUrl = formData.get("baseUrl") as string | null
+    const textContent = formData.get("textContent") as string | null
     const model = (formData.get("model") as string) || "gpt-4o-mini"
 
     if (!file) {
@@ -33,6 +50,13 @@ export async function POST(request: NextRequest) {
 
     if (!sourceLang || !targetLang) {
       return NextResponse.json({ error: "Source and target languages are required" }, { status: 400 })
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return NextResponse.json(
+        { error: "File is too large. Please upload a file smaller than 5MB." },
+        { status: 413 },
+      )
     }
 
     const sourceLanguage = LANGUAGE_NAMES[sourceLang] || sourceLang
@@ -65,17 +89,17 @@ TRANSLATED TEXT:
 Preserve the structure and formatting of the text as much as possible.`
 
       // Use vision model for images
-      const visionModel = apiKey && baseUrl ? `${model}` : "openai/gpt-4o"
+      const visionModel = apiKey ? `${model}` : "openai/gpt-4o"
 
       const openai =
-        apiKey && baseUrl
+        apiKey
           ? createOpenAI({
               apiKey,
-              baseURL: baseUrl,
+              baseURL: baseUrl || undefined,
             })
           : undefined
 
-      const { text: translatedContent } = await generateText({
+      const { text: translatedContent, usage } = await generateText({
         model: openai ? openai(model) : visionModel,
         messages: [
           {
@@ -88,10 +112,13 @@ Preserve the structure and formatting of the text as much as possible.`
         ],
       })
 
-      return NextResponse.json({ translatedContent })
+      return NextResponse.json({
+        translatedContent,
+        tokenUsage: normalizeTokenUsage(usage),
+      })
     } else if (isTextFile) {
       // For text files, read content directly
-      content = await file.text()
+      content = textContent ?? (await file.text())
 
       prompt = `You are a professional translator. Translate the following ${sourceLanguage} text to ${targetLanguage}.
 
@@ -109,19 +136,22 @@ ${content}
 Provide only the translated text with preserved formatting, without any explanations or additional comments.`
 
       const openai =
-        apiKey && baseUrl
+        apiKey
           ? createOpenAI({
               apiKey,
-              baseURL: baseUrl,
+              baseURL: baseUrl || undefined,
             })
           : undefined
 
-      const { text: translatedContent } = await generateText({
+      const { text: translatedContent, usage } = await generateText({
         model: openai ? openai(model) : `openai/${model}`,
         prompt,
       })
 
-      return NextResponse.json({ translatedContent })
+      return NextResponse.json({
+        translatedContent,
+        tokenUsage: normalizeTokenUsage(usage),
+      })
     } else {
       return NextResponse.json(
         { error: "Unsupported file type. Please upload .md, .mdx, .txt, or image files." },

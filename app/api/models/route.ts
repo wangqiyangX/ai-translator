@@ -2,6 +2,10 @@ import { NextResponse } from "next/server"
 
 export const maxDuration = 10
 
+interface ModelsResponse {
+  data?: Array<{ id?: string }>
+}
+
 export async function POST(req: Request) {
   try {
     const { apiKey, baseUrl, model } = await req.json()
@@ -16,17 +20,8 @@ export async function POST(req: Request) {
     if (apiKey) {
       // Custom API key provided - check using /models endpoint
       // This doesn't consume tokens, just checks connectivity
-      if (!baseUrl) {
-        return NextResponse.json(
-          {
-            available: false,
-            error: "Base URL is required when using custom API key",
-          },
-          { status: 400 }
-        )
-      }
       try {
-        const apiBaseUrl = baseUrl
+        const apiBaseUrl = baseUrl || "https://api.openai.com/v1"
         const modelsUrl = `${apiBaseUrl.replace(/\/$/, "")}/models`
 
         const response = await fetch(modelsUrl, {
@@ -53,11 +48,11 @@ export async function POST(req: Request) {
           )
         }
 
-        const data = await response.json()
-        const models = data.data || []
+        const data = (await response.json()) as ModelsResponse
+        const models = Array.isArray(data.data) ? data.data : []
 
         // Check if the specific model is available in the list
-        const modelExists = models.some((m: any) => m.id === model)
+        const modelExists = models.some((m) => m.id === model)
 
         return NextResponse.json({
           available: true,
@@ -78,14 +73,15 @@ export async function POST(req: Request) {
           { status: 500 }
         )
       }
-    } else {
-      // Use Vercel AI Gateway - assume available if no API key is provided
-      // The gateway will handle the actual connection
-      return NextResponse.json({
-        available: true,
-        message: "Using Vercel AI Gateway",
-      })
     }
+
+    return NextResponse.json(
+      {
+        available: false,
+        error: "API key is required for custom API availability checks",
+      },
+      { status: 400 },
+    )
   } catch (error) {
     console.error("Model check error:", error)
     return NextResponse.json(
@@ -100,4 +96,3 @@ export async function POST(req: Request) {
     )
   }
 }
-

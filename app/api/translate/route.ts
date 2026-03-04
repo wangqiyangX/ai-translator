@@ -19,6 +19,20 @@ const LANGUAGE_NAMES: Record<string, string> = {
   hi: "Hindi",
 }
 
+interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+
+function normalizeTokenUsage(usage: Partial<TokenUsage> | undefined): TokenUsage {
+  return {
+    inputTokens: usage?.inputTokens ?? 0,
+    outputTokens: usage?.outputTokens ?? 0,
+    totalTokens: usage?.totalTokens ?? 0,
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const { text, sourceLang, targetLang, apiKey, baseUrl, model = "gpt-4o-mini" } = await req.json()
@@ -35,28 +49,22 @@ export async function POST(req: Request) {
 Text to translate:
 ${text}`
 
-    let aiModel: any
-
-    if (apiKey) {
-      // Custom API key provided - create OpenAI provider with custom config
-      const customOpenAI = createOpenAI({
-        apiKey: apiKey,
-        baseURL: baseUrl || undefined,
-      })
-      aiModel = customOpenAI(model)
-    } else {
-      // Use Vercel AI Gateway (no API key needed)
-      aiModel = `openai/${model}`
-    }
-
-    const { text: translatedText } = await generateText({
-      model: aiModel,
+    const { text: translatedText, usage } = await generateText({
+      model: apiKey
+        ? createOpenAI({
+            apiKey,
+            baseURL: baseUrl || undefined,
+          })(model)
+        : `openai/${model}`,
       prompt,
       maxOutputTokens: 2000,
       temperature: 0.3,
     })
 
-    return NextResponse.json({ translatedText })
+    return NextResponse.json({
+      translatedText,
+      tokenUsage: normalizeTokenUsage(usage),
+    })
   } catch (error) {
     console.error("Translation error:", error)
     return NextResponse.json(
