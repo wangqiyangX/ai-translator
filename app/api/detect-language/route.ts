@@ -58,7 +58,6 @@ ${text}`
           })(model)
         : `openai/${model}`,
       prompt,
-      temperature: 0,
       // Some providers enforce a minimum max_output_tokens >= 16.
       maxOutputTokens: 16,
     })

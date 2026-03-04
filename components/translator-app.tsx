@@ -1,138 +1,128 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  ArrowRightLeft,
-  Languages,
-  Settings,
   FileText,
   ImageIcon,
   TextIcon,
-  Check,
-  Clipboard,
-  Download,
-  ArrowRight,
   Globe,
-  RefreshCw,
   GithubIcon,
-  AlertCircle,
-  CheckCircle2,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ModeToggle } from "./mode-toggle";
-import {
-  Dropzone,
-  DropzoneContent,
-  DropzoneEmptyState,
-} from "@/components/ui/shadcn-io/dropzone";
-import { Spinner } from "@/components/ui/spinner";
-import { Separator } from "@/components/ui/separator";
-import Image from "next/image";
 import Link from "next/link";
-
-const LANGUAGES = [
-  { code: "en", name: "English" /* flag: "🇺🇸" */ },
-  { code: "es", name: "Spanish" /* flag: "🇪🇸" */ },
-  { code: "fr", name: "French" /* flag: "🇫🇷" */ },
-  { code: "de", name: "German" /* flag: "🇩🇪" */ },
-  { code: "it", name: "Italian" /* flag: "🇮🇹" */ },
-  { code: "pt", name: "Portuguese" /* flag: "🇵🇹" */ },
-  { code: "ru", name: "Russian" /* flag: "🇷🇺" */ },
-  { code: "ja", name: "Japanese" /* flag: "🇯🇵" */ },
-  { code: "ko", name: "Korean" /* flag: "🇰🇷" */ },
-  { code: "zh", name: "Chinese" /* flag: "🇨🇳" */ },
-  { code: "ar", name: "Arabic" /* flag: "🇸🇦" */ },
-  { code: "hi", name: "Hindi" /* flag: "🇮🇳"  */ },
-];
-
-const MODELS = [
-  { value: "gpt-5.2", label: "GPT-5.2", provider: "OpenAI" },
-  { value: "gpt-5.1", label: "GPT-5.1", provider: "OpenAI" },
-  {
-    value: "claude-opus-4-5-20251101",
-    label: "Claude Opus 4.5",
-    provider: "Anthropic",
-  },
-  {
-    value: "claude-sonnet-4-5-20250929",
-    label: "Claude Sonnet 4.5",
-    provider: "Anthropic",
-  },
-  {
-    value: "claude-haiku-4-5-20251001",
-    label: "Claude Haiku 4.5",
-    provider: "Anthropic",
-  },
-  {
-    value: "gemini-3-pro-preview",
-    label: "Gemini 3 Pro Preview",
-    provider: "Google",
-  },
-  {
-    value: "gemini-2.5-pro",
-    label: "Gemini 2.5 Pro",
-    provider: "Google",
-  },
-  { value: "custom", label: "Custom", provider: "Custom" },
-];
-
-interface ApiConfig {
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-}
-
-interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-}
-
-interface TokenStats extends TokenUsage {
-  requests: number;
-}
+import { LANGUAGES, MODELS } from "./translator/constants";
+import { SettingsDialog } from "./translator/settings-dialog";
+import { LanguageControls } from "./translator/language-controls";
+import { TextTab } from "./translator/text-tab";
+import { DocumentTab } from "./translator/document-tab";
+import { ImageTab } from "./translator/image-tab";
+import { ApiStatusCard } from "./translator/api-status-card";
+import type { ApiConfig, OutputMode, TokenStats } from "./translator/types";
+import { useTranslatorRuntimeStore, useTranslatorSettingsStore } from "./translator/store";
 
 const STORAGE_KEY = "ai-translator-config";
 const TOKEN_STATS_STORAGE_KEY = "ai-translator-token-stats";
+const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_SOURCE_LANG = "en";
+const NO_API_CONFIG_MESSAGE =
+  "No custom API configured. Enter an API key to test API availability.";
+const TEXT_DETECT_DEBOUNCE_MS = 800;
+const LANG_CHANGE_TRANSLATE_DEBOUNCE_MS = 300;
+
+function isPresetModel(model: string) {
+  return MODELS.some((m) => m.value === model && m.value !== "custom");
+}
+
+function normalizeApiConfig(parsed: Partial<ApiConfig>): ApiConfig {
+  return {
+    apiKey: parsed.apiKey ?? "",
+    baseUrl: parsed.baseUrl ?? "",
+    model: parsed.model ?? DEFAULT_MODEL,
+    customPrompt: parsed.customPrompt ?? "",
+    outputMode: parsed.outputMode === "bilingual" ? "bilingual" : "translation-only",
+    autoDetectSourceLanguage: parsed.autoDetectSourceLanguage ?? true,
+  };
+}
+
+function toDialogModelState(config: ApiConfig) {
+  if (!isPresetModel(config.model) && config.model) {
+    return {
+      tempConfig: { ...config, model: "custom" },
+      customModelName: config.model,
+    };
+  }
+
+  return {
+    tempConfig: config,
+    customModelName: "",
+  };
+}
+
+function createTranslationFormData(params: {
+  file: File;
+  sourceLang: string;
+  targetLang: string;
+  model: string;
+  customPrompt: string;
+  outputMode: OutputMode;
+  apiKey: string;
+  baseUrl: string;
+  textContent?: string;
+}) {
+  const formData = new FormData();
+  formData.append("file", params.file);
+  if (typeof params.textContent === "string") {
+    formData.append("textContent", params.textContent);
+  }
+  formData.append("sourceLang", params.sourceLang);
+  formData.append("targetLang", params.targetLang);
+  formData.append("model", params.model);
+  formData.append("customPrompt", params.customPrompt);
+  formData.append("outputMode", params.outputMode);
+
+  if (params.apiKey) formData.append("apiKey", params.apiKey);
+  if (params.baseUrl) formData.append("baseUrl", params.baseUrl);
+
+  return formData;
+}
+
+function toErrorText(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export default function TranslatorApp() {
-  const [isCopied, setIsCopied] = useState(false);
+  const sourceText = useTranslatorRuntimeStore((state) => state.sourceText);
+  const isCopied = useTranslatorRuntimeStore((state) => state.isCopied);
+  const selectedDocuments = useTranslatorRuntimeStore((state) => state.selectedDocuments);
+  const selectedImages = useTranslatorRuntimeStore((state) => state.selectedImages);
+  const selectedDocumentContent = useTranslatorRuntimeStore(
+    (state) => state.selectedDocumentContent
+  );
+  const setTranslatedText = useTranslatorRuntimeStore((state) => state.setTranslatedText);
+  const setIsTranslating = useTranslatorRuntimeStore((state) => state.setIsTranslating);
+  const setIsCopied = useTranslatorRuntimeStore((state) => state.setIsCopied);
+  const setTranslatedFileContent = useTranslatorRuntimeStore(
+    (state) => state.setTranslatedFileContent
+  );
+  const setIsTranslatingFile = useTranslatorRuntimeStore(
+    (state) => state.setIsTranslatingFile
+  );
+  const setTranslatedImageContent = useTranslatorRuntimeStore(
+    (state) => state.setTranslatedImageContent
+  );
+  const setIsTranslatingImage = useTranslatorRuntimeStore(
+    (state) => state.setIsTranslatingImage
+  );
+  const setSelectedDocumentContent = useTranslatorRuntimeStore(
+    (state) => state.setSelectedDocumentContent
+  );
+  const sourceLang = useTranslatorSettingsStore((state) => state.sourceLang);
+  const targetLang = useTranslatorSettingsStore((state) => state.targetLang);
+  const setSourceLang = useTranslatorSettingsStore((state) => state.setSourceLang);
+  const setTargetLang = useTranslatorSettingsStore((state) => state.setTargetLang);
 
-  const [sourceText, setSourceText] = useState("");
-  const [translatedText, setTranslatedText] = useState("");
-  const [sourceLang, setSourceLang] = useState("en");
-  const [targetLang, setTargetLang] = useState("zh");
-  const [isTranslating, setIsTranslating] = useState(false);
-
-  const [selectedDocuments, setSelectedDocuments] = useState<
-    File[] | undefined
-  >();
-  const [selectedImages, setSelectedImages] = useState<File[] | undefined>();
-  const [preview, setPreview] = useState<string | null>(null);
-  const [translatedFileContent, setTranslatedFileContent] = useState("");
-  const [isTranslatingFile, setIsTranslatingFile] = useState(false);
-  const [translatedImageContent, setTranslatedImageContent] = useState("");
-  const [isTranslatingImage, setIsTranslatingImage] = useState(false);
-  const [selectedDocumentContent, setSelectedDocumentContent] = useState("");
   const textTranslateAbortRef = useRef<AbortController | null>(null);
   const textRequestIdRef = useRef(0);
   const languageDetectAbortRef = useRef<AbortController | null>(null);
@@ -140,56 +130,41 @@ export default function TranslatorApp() {
   const sourceLangRef = useRef(sourceLang);
   const skipNextLangChangeTranslateRef = useRef(false);
 
-  const [apiConfig, setApiConfig] = useState<ApiConfig>({
-    apiKey: "",
-    baseUrl: "",
-    model: "gpt-4o-mini",
-  });
-  const [tempApiConfig, setTempApiConfig] = useState<ApiConfig>({
-    apiKey: "",
-    baseUrl: "",
-    model: "gpt-4o-mini",
-  });
-  const [customModelName, setCustomModelName] = useState("");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [apiStatus, setApiStatus] = useState<
-    "idle" | "checking" | "available" | "unavailable"
-  >("idle");
-  const [apiStatusMessage, setApiStatusMessage] = useState("");
-  const [tokenStats, setTokenStats] = useState<TokenStats>({
-    requests: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-  });
+  const apiConfig = useTranslatorSettingsStore((state) => state.apiConfig);
+  const dialogOpen = useTranslatorSettingsStore((state) => state.dialogOpen);
+  const setApiConfig = useTranslatorSettingsStore((state) => state.setApiConfig);
+  const setTempApiConfig = useTranslatorSettingsStore((state) => state.setTempApiConfig);
+  const setCustomModelName = useTranslatorSettingsStore((state) => state.setCustomModelName);
+  const tokenStats = useTranslatorRuntimeStore((state) => state.tokenStats);
+  const setApiStatus = useTranslatorRuntimeStore((state) => state.setApiStatus);
+  const setApiStatusMessage = useTranslatorRuntimeStore((state) => state.setApiStatusMessage);
+  const setTokenStats = useTranslatorRuntimeStore((state) => state.setTokenStats);
+  const addTokenUsage = useTranslatorRuntimeStore((state) => state.addTokenUsage);
 
   useEffect(() => {
     const savedConfig = localStorage.getItem(STORAGE_KEY);
     if (savedConfig) {
       try {
-        const parsed = JSON.parse(savedConfig);
-        setApiConfig(parsed);
-        // Check if the saved model is a custom model (not in MODELS list)
-        const isCustomModel = !MODELS.some(
-          (m) => m.value === parsed.model && m.value !== "custom"
-        );
-        if (isCustomModel && parsed.model) {
-          setCustomModelName(parsed.model);
-          setTempApiConfig({ ...parsed, model: "custom" });
-        } else {
-          setTempApiConfig(parsed);
-        }
+        const parsed = JSON.parse(savedConfig) as Partial<ApiConfig>;
+        const normalizedConfig = normalizeApiConfig(parsed);
+        setApiConfig(normalizedConfig);
+        const dialogState = toDialogModelState(normalizedConfig);
+        setCustomModelName(dialogState.customModelName);
+        setTempApiConfig(dialogState.tempConfig);
       } catch (error) {
         console.error("Failed to parse saved config:", error);
       }
     }
-  }, []);
+  }, [setApiConfig, setCustomModelName, setTempApiConfig]);
 
   useEffect(() => {
     if (
       apiConfig.apiKey ||
       apiConfig.baseUrl ||
-      apiConfig.model !== "gpt-4o-mini"
+      apiConfig.model !== DEFAULT_MODEL ||
+      apiConfig.customPrompt ||
+      apiConfig.outputMode !== "translation-only" ||
+      !apiConfig.autoDetectSourceLanguage
     ) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(apiConfig));
     }
@@ -210,7 +185,7 @@ export default function TranslatorApp() {
     } catch (error) {
       console.error("Failed to parse saved token stats:", error);
     }
-  }, []);
+  }, [setTokenStats]);
 
   useEffect(() => {
     localStorage.setItem(TOKEN_STATS_STORAGE_KEY, JSON.stringify(tokenStats));
@@ -219,60 +194,38 @@ export default function TranslatorApp() {
   // Sync tempApiConfig when dialog opens
   useEffect(() => {
     if (dialogOpen) {
-      // Check if the current model is a custom model (not in MODELS list)
-      const isCustomModel = !MODELS.some(
-        (m) => m.value === apiConfig.model && m.value !== "custom"
-      );
-      if (isCustomModel && apiConfig.model) {
-        setCustomModelName(apiConfig.model);
-        setTempApiConfig({ ...apiConfig, model: "custom" });
-      } else {
-        setTempApiConfig(apiConfig);
-        setCustomModelName("");
-      }
+      const dialogState = toDialogModelState(apiConfig);
+      setTempApiConfig(dialogState.tempConfig);
+      setCustomModelName(dialogState.customModelName);
     }
-  }, [dialogOpen, apiConfig]);
+  }, [dialogOpen, apiConfig, setCustomModelName, setTempApiConfig]);
 
   useEffect(() => {
     sourceLangRef.current = sourceLang;
   }, [sourceLang]);
 
-  const accumulateTokenUsage = useCallback((usage?: Partial<TokenUsage>) => {
-    if (!usage) return;
-
-    const inputTokens = usage.inputTokens ?? 0;
-    const outputTokens = usage.outputTokens ?? 0;
-    const totalTokens = usage.totalTokens ?? inputTokens + outputTokens;
-
-    if (inputTokens === 0 && outputTokens === 0 && totalTokens === 0) {
-      return;
-    }
-
-    setTokenStats((prev) => ({
-      requests: prev.requests + 1,
-      inputTokens: prev.inputTokens + inputTokens,
-      outputTokens: prev.outputTokens + outputTokens,
-      totalTokens: prev.totalTokens + totalTokens,
-    }));
+  const abortInFlightTextRequests = useCallback(() => {
+    textTranslateAbortRef.current?.abort();
+    languageDetectAbortRef.current?.abort();
   }, []);
 
   const handleTranslate = useCallback(
     async (sourceLangOverride?: string, targetLangOverride?: string) => {
-    const requestSourceLang = sourceLangOverride || sourceLang;
-    const requestTargetLang = targetLangOverride || targetLang;
+      const requestSourceLang = sourceLangOverride || sourceLang;
+      const requestTargetLang = targetLangOverride || targetLang;
 
-    if (!sourceText.trim()) {
-      textTranslateAbortRef.current?.abort();
-      setTranslatedText("");
-      setIsTranslating(false);
-      return;
-    }
+      if (!sourceText.trim()) {
+        textTranslateAbortRef.current?.abort();
+        setTranslatedText("");
+        setIsTranslating(false);
+        return;
+      }
 
-    if (!apiConfig.apiKey.trim()) {
-      setTranslatedText("Error: Please configure your API key in Settings.");
-      setIsTranslating(false);
-      return;
-    }
+      if (!apiConfig.apiKey.trim()) {
+        setTranslatedText("Error: Please configure your API key in Settings.");
+        setIsTranslating(false);
+        return;
+      }
 
       textTranslateAbortRef.current?.abort();
       const controller = new AbortController();
@@ -295,6 +248,8 @@ export default function TranslatorApp() {
             apiKey: apiConfig.apiKey || undefined,
             baseUrl: apiConfig.baseUrl || undefined,
             model: apiConfig.model,
+            customPrompt: apiConfig.customPrompt || undefined,
+            outputMode: apiConfig.outputMode,
           }),
         });
 
@@ -306,7 +261,7 @@ export default function TranslatorApp() {
         const data = await response.json();
         if (requestId === textRequestIdRef.current) {
           setTranslatedText(data.translatedText);
-          accumulateTokenUsage(data.tokenUsage);
+          addTokenUsage(data.tokenUsage);
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
@@ -315,10 +270,7 @@ export default function TranslatorApp() {
         console.error("Translation error:", error);
         if (requestId === textRequestIdRef.current) {
           setTranslatedText(
-            `Error: ${error instanceof Error
-              ? error.message
-              : "Translation failed. Please try again."
-            }`
+            `Error: ${toErrorText(error, "Translation failed. Please try again.")}`
           );
         }
       } finally {
@@ -327,13 +279,17 @@ export default function TranslatorApp() {
         }
       }
     }, [
-    accumulateTokenUsage,
+    addTokenUsage,
     sourceText,
     sourceLang,
     targetLang,
     apiConfig.apiKey,
     apiConfig.baseUrl,
     apiConfig.model,
+    apiConfig.customPrompt,
+    apiConfig.outputMode,
+    setTranslatedText,
+    setIsTranslating,
   ]);
 
   const detectSourceLanguage = useCallback(
@@ -359,6 +315,7 @@ export default function TranslatorApp() {
             apiKey: apiConfig.apiKey || undefined,
             baseUrl: apiConfig.baseUrl || undefined,
             model: apiConfig.model,
+            customPrompt: apiConfig.customPrompt || undefined,
           }),
         });
 
@@ -367,7 +324,7 @@ export default function TranslatorApp() {
         }
 
         const data = await response.json();
-        accumulateTokenUsage(data.tokenUsage);
+        addTokenUsage(data.tokenUsage);
         if (requestId !== detectRequestIdRef.current) return null;
         return typeof data.language === "string" ? data.language : null;
       } catch (error) {
@@ -377,13 +334,18 @@ export default function TranslatorApp() {
         return null;
       }
     },
-    [accumulateTokenUsage, apiConfig.apiKey, apiConfig.baseUrl, apiConfig.model]
+    [
+      addTokenUsage,
+      apiConfig.apiKey,
+      apiConfig.baseUrl,
+      apiConfig.model,
+      apiConfig.customPrompt,
+    ]
   );
 
   useEffect(() => {
     if (!sourceText.trim()) {
-      textTranslateAbortRef.current?.abort();
-      languageDetectAbortRef.current?.abort();
+      abortInFlightTextRequests();
       setTranslatedText("");
       setIsTranslating(false);
       return;
@@ -391,6 +353,11 @@ export default function TranslatorApp() {
 
     const timeoutId = setTimeout(() => {
       void (async () => {
+        if (!apiConfig.autoDetectSourceLanguage) {
+          await handleTranslate();
+          return;
+        }
+
         const detectedLanguage = await detectSourceLanguage(sourceText);
 
         if (detectedLanguage && detectedLanguage !== sourceLangRef.current) {
@@ -399,7 +366,8 @@ export default function TranslatorApp() {
             detectedLanguage === targetLang
               ? previousSourceLang !== detectedLanguage
                 ? previousSourceLang
-                : LANGUAGES.find((lang) => lang.code !== detectedLanguage)?.code || "en"
+                : LANGUAGES.find((lang) => lang.code !== detectedLanguage)?.code ||
+                DEFAULT_SOURCE_LANG
               : targetLang;
 
           skipNextLangChangeTranslateRef.current = true;
@@ -413,10 +381,21 @@ export default function TranslatorApp() {
 
         await handleTranslate();
       })();
-    }, 800);
+    }, TEXT_DETECT_DEBOUNCE_MS);
 
     return () => clearTimeout(timeoutId);
-  }, [sourceText, targetLang, detectSourceLanguage, handleTranslate]);
+  }, [
+    sourceText,
+    targetLang,
+    apiConfig.autoDetectSourceLanguage,
+    detectSourceLanguage,
+    handleTranslate,
+    abortInFlightTextRequests,
+    setSourceLang,
+    setTargetLang,
+    setTranslatedText,
+    setIsTranslating,
+  ]);
 
   useEffect(() => {
     if (!sourceText.trim()) return;
@@ -428,17 +407,25 @@ export default function TranslatorApp() {
 
     const timeoutId = setTimeout(() => {
       void handleTranslate();
-    }, 300);
+    }, LANG_CHANGE_TRANSLATE_DEBOUNCE_MS);
 
     return () => clearTimeout(timeoutId);
   }, [sourceLang, targetLang, sourceText, handleTranslate]);
 
   useEffect(() => {
     return () => {
-      textTranslateAbortRef.current?.abort();
-      languageDetectAbortRef.current?.abort();
+      abortInFlightTextRequests();
     };
-  }, []);
+  }, [abortInFlightTextRequests]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      abortInFlightTextRequests();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [abortInFlightTextRequests]);
 
   const handleFileTranslate = async () => {
     if (!selectedDocuments?.[0]) return;
@@ -451,14 +438,17 @@ export default function TranslatorApp() {
     setTranslatedFileContent("");
 
     try {
-      const formData = new FormData();
-      formData.append("file", selectedDocuments[0]);
-      formData.append("textContent", selectedDocumentContent);
-      formData.append("sourceLang", sourceLang);
-      formData.append("targetLang", targetLang);
-      formData.append("model", apiConfig.model);
-      if (apiConfig.apiKey) formData.append("apiKey", apiConfig.apiKey);
-      if (apiConfig.baseUrl) formData.append("baseUrl", apiConfig.baseUrl);
+      const formData = createTranslationFormData({
+        file: selectedDocuments[0],
+        textContent: selectedDocumentContent,
+        sourceLang,
+        targetLang,
+        model: apiConfig.model,
+        customPrompt: apiConfig.customPrompt,
+        outputMode: apiConfig.outputMode,
+        apiKey: apiConfig.apiKey,
+        baseUrl: apiConfig.baseUrl,
+      });
 
       const response = await fetch("/api/translate-file", {
         method: "POST",
@@ -472,14 +462,11 @@ export default function TranslatorApp() {
 
       const data = await response.json();
       setTranslatedFileContent(data.translatedContent);
-      accumulateTokenUsage(data.tokenUsage);
+      addTokenUsage(data.tokenUsage);
     } catch (error) {
       console.error("File translation error:", error);
       setTranslatedFileContent(
-        `Error: ${error instanceof Error
-          ? error.message
-          : "File translation failed. Please try again."
-        }`
+        `Error: ${toErrorText(error, "File translation failed. Please try again.")}`
       );
     } finally {
       setIsTranslatingFile(false);
@@ -497,13 +484,16 @@ export default function TranslatorApp() {
     setTranslatedImageContent("");
 
     try {
-      const formData = new FormData();
-      formData.append("file", selectedImages[0]);
-      formData.append("sourceLang", sourceLang);
-      formData.append("targetLang", targetLang);
-      formData.append("model", apiConfig.model);
-      if (apiConfig.apiKey) formData.append("apiKey", apiConfig.apiKey);
-      if (apiConfig.baseUrl) formData.append("baseUrl", apiConfig.baseUrl);
+      const formData = createTranslationFormData({
+        file: selectedImages[0],
+        sourceLang,
+        targetLang,
+        model: apiConfig.model,
+        customPrompt: apiConfig.customPrompt,
+        outputMode: apiConfig.outputMode,
+        apiKey: apiConfig.apiKey,
+        baseUrl: apiConfig.baseUrl,
+      });
 
       const response = await fetch("/api/translate-image", {
         method: "POST",
@@ -517,28 +507,15 @@ export default function TranslatorApp() {
 
       const data = await response.json();
       setTranslatedImageContent(data.translatedText || "");
-      accumulateTokenUsage(data.tokenUsage);
+      addTokenUsage(data.tokenUsage);
     } catch (error) {
       console.error("Image translation error:", error);
       setTranslatedImageContent(
-        `Error: ${error instanceof Error
-          ? error.message
-          : "Image translation failed. Please try again."
-        }`
+        `Error: ${toErrorText(error, "Image translation failed. Please try again.")}`
       );
     } finally {
       setIsTranslatingImage(false);
     }
-  };
-
-  const handleCopyTranslatedText = () => {
-    navigator.clipboard.writeText(translatedText);
-    setIsCopied(true);
-  };
-
-  const handleCopyTranslatedDocumentContent = () => {
-    navigator.clipboard.writeText(translatedFileContent);
-    setIsCopied(true);
   };
 
   useEffect(() => {
@@ -546,7 +523,7 @@ export default function TranslatorApp() {
       const timer = setTimeout(() => setIsCopied(false), 1500);
       return () => clearTimeout(timer);
     }
-  }, [isCopied]);
+  }, [isCopied, setIsCopied]);
 
   useEffect(() => {
     setTranslatedFileContent("");
@@ -555,62 +532,12 @@ export default function TranslatorApp() {
       setSelectedDocumentContent(content);
     };
     loadDocumentContent();
-  }, [selectedDocuments]);
-
-  useEffect(() => {
-    return () => {
-      if (preview) {
-        URL.revokeObjectURL(preview);
-      }
-    };
-  }, [preview]);
-
-  const handleDownloadTranslation = () => {
-    if (!translatedFileContent || !selectedDocuments) return;
-
-    const blob = new Blob([translatedFileContent], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const originalName = selectedDocuments[0].name;
-    const extension = originalName.substring(originalName.lastIndexOf("."));
-    a.download = `${originalName.replace(
-      extension,
-      ""
-    )}-${targetLang}${extension}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleSwapLanguages = () => {
-    setSourceLang(targetLang);
-    setTargetLang(sourceLang);
-    setSourceText(translatedText);
-    setTranslatedText(sourceText);
-  };
-
-  const handleSaveApiConfig = () => {
-    // If custom model is selected, use the custom model name
-    if (tempApiConfig.model === "custom") {
-      if (!customModelName.trim()) {
-        // Don't save if custom model name is empty
-        return;
-      }
-      setApiConfig({ ...tempApiConfig, model: customModelName.trim() });
-    } else {
-      setApiConfig(tempApiConfig);
-    }
-    setDialogOpen(false);
-  };
+  }, [selectedDocuments, setSelectedDocumentContent, setTranslatedFileContent]);
 
   const checkApiAvailability = useCallback(async () => {
     if (!apiConfig.apiKey) {
       setApiStatus("idle");
-      setApiStatusMessage(
-        "No custom API configured. Enter an API key to test API availability."
-      );
+      setApiStatusMessage(NO_API_CONFIG_MESSAGE);
       return;
     }
 
@@ -650,15 +577,19 @@ export default function TranslatorApp() {
           : "Failed to connect to API. Please check your settings."
       );
     }
-  }, [apiConfig.apiKey, apiConfig.baseUrl, apiConfig.model]);
+  }, [
+    apiConfig.apiKey,
+    apiConfig.baseUrl,
+    apiConfig.model,
+    setApiStatus,
+    setApiStatusMessage,
+  ]);
 
   // Check API availability when config changes
   useEffect(() => {
     if (!apiConfig.apiKey) {
       setApiStatus("idle");
-      setApiStatusMessage(
-        "No custom API configured. Enter an API key to test API availability."
-      );
+      setApiStatusMessage(NO_API_CONFIG_MESSAGE);
       return;
     }
 
@@ -675,6 +606,8 @@ export default function TranslatorApp() {
     apiConfig.apiKey,
     apiConfig.baseUrl,
     checkApiAvailability,
+    setApiStatus,
+    setApiStatusMessage,
   ]);
 
   return (
@@ -702,114 +635,7 @@ export default function TranslatorApp() {
               <GithubIcon className="size-4" />
             </Link>
           </Button>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <Settings className="h-4 w-4" />
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>API Settings</DialogTitle>
-                <DialogDescription>
-                  Configure your AI API settings. Leave fields empty to use the
-                  default gateway.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="api-key">API Key</Label>
-                  <Input
-                    id="api-key"
-                    type="password"
-                    placeholder="sk-... or your provider's API key"
-                    value={tempApiConfig.apiKey}
-                    onChange={(e) =>
-                      setTempApiConfig({
-                        ...tempApiConfig,
-                        apiKey: e.target.value,
-                      })
-                    }
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Optional. Your API key is stored locally and only sent to
-                    this app&apos;s server endpoints to perform translation.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="base-url">Base URL</Label>
-                  <Input
-                    id="base-url"
-                    type="url"
-                    placeholder="https://api.openai.com/v1"
-                    value={tempApiConfig.baseUrl}
-                    onChange={(e) =>
-                      setTempApiConfig({
-                        ...tempApiConfig,
-                        baseUrl: e.target.value,
-                      })
-                    }
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Optional. Use a custom API-compatible endpoint.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="model">Model</Label>
-                  <Select
-                    value={tempApiConfig.model}
-                    onValueChange={(value) =>
-                      setTempApiConfig({ ...tempApiConfig, model: value })
-                    }
-                  >
-                    <SelectTrigger id="model">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MODELS.map((model) => (
-                        <SelectItem key={model.value} value={model.value}>
-                          {model.label}{" "}
-                          <span className="text-muted-foreground text-xs">
-                            ({model.provider})
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {tempApiConfig.model === "custom" && (
-                    <Input
-                      id="custom-model"
-                      placeholder="Input model name, for example: gpt-4, claude-3-opus"
-                      value={customModelName}
-                      onChange={(e) => {
-                        setCustomModelName(e.target.value);
-                        // Update tempApiConfig.model with the custom model name for preview
-                        // but keep the select value as "custom"
-                      }}
-                      className="mt-2"
-                    />
-                  )}
-                  <p className="text-sm text-muted-foreground">
-                    {tempApiConfig.model === "custom"
-                      ? "Input the model name you want to use."
-                      : "Select the model to use for translation."}
-                  </p>
-                </div>
-
-                <Button
-                  onClick={handleSaveApiConfig}
-                  className="w-full"
-                  disabled={
-                    tempApiConfig.model === "custom" && !customModelName.trim()
-                  }
-                >
-                  Save Settings
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <SettingsDialog />
         </div>
       </div>
 
@@ -830,354 +656,42 @@ export default function TranslatorApp() {
             </TabsTrigger>
           </TabsList>
 
-          <div className="flex gap-1 my-2">
-            <Select value={sourceLang} onValueChange={setSourceLang}>
-              <SelectTrigger id="source-lang" className="w-full" size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {LANGUAGES.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code}>
-                    <span className="flex items-center gap-2">
-                      {/* <span>{lang.flag}</span> */}
-                      <span>{lang.name}</span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Button
-              onClick={handleSwapLanguages}
-              variant="ghost"
-              size="sm"
-              disabled={isTranslating}
-            >
-              <ArrowRightLeft className="h-4 w-4" />
-            </Button>
-
-            <Select value={targetLang} onValueChange={setTargetLang}>
-              <SelectTrigger id="target-lang" className="w-full" size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {LANGUAGES.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code}>
-                    <span className="flex items-center gap-2">
-                      {/* <span>{lang.flag}</span> */}
-                      <span>{lang.name}</span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <LanguageControls />
         </div>
 
         <TabsContent value="text">
-          <div className="grid md:grid-cols-2 gap-2 min-h-[240px]">
-            <Textarea
-              id="source-text"
-              placeholder="Enter text to translate..."
-              value={sourceText}
-              onChange={(e) => setSourceText(e.target.value)}
-              className="resize-none rounded-lg"
-            />
-
-            <Textarea
-              id="translated-text"
-              placeholder="Translation will appear here..."
-              value={translatedText}
-              readOnly
-              className="resize-none bg-muted/50 rounded-lg"
-            />
-          </div>
-
-          <div className="flex justify-end my-2">
-            <Button
-              variant="outline"
-              onClick={handleCopyTranslatedText}
-              size="sm"
-              disabled={translatedText.length === 0}
-            >
-              {isCopied ? (
-                <>
-                  <Check className="h-4 w-4" />
-                  Copied
-                </>
-              ) : (
-                <>
-                  <Clipboard className="h-4 w-4" />
-                  Copy
-                </>
-              )}
-            </Button>
-          </div>
+          <TextTab />
         </TabsContent>
 
         <TabsContent value="document">
-          <Dropzone
-            accept={{
-              "text/mdx": [".mdx"],
-              "text/markdown": [".md", ".markdown"],
-              "text/plain": [".txt"],
-            }}
-            maxFiles={1}
-            onDrop={(files: File[]) => {
-              setSelectedDocuments(files);
-            }}
-            onError={console.error}
-            src={selectedDocuments}
-            className="min-h-[140px]"
-          >
-            <DropzoneEmptyState />
-            <DropzoneContent />
-          </Dropzone>
-
-          {selectedDocuments && (
-            <>
-              <Separator className="my-4" />
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="file-translation">Translated Content</Label>
-                  <div className="flex gap-2 items-center">
-                    {translatedFileContent ? (
-                      <>
-                        <Button
-                          onClick={handleCopyTranslatedDocumentContent}
-                          size="sm"
-                          disabled={translatedFileContent.length === 0}
-                        >
-                          {isCopied ? (
-                            <>
-                              <Check className="h-4 w-4" />
-                              Copied
-                            </>
-                          ) : (
-                            <>
-                              <Clipboard className="h-4 w-4" />
-                              Copy
-                            </>
-                          )}
-                        </Button>
-                        <Button
-                          onClick={handleDownloadTranslation}
-                          variant="outline"
-                          size="sm"
-                          disabled={translatedFileContent.length === 0}
-                        >
-                          <Download />
-                        </Button>
-                        <Button
-                          onClick={handleFileTranslate}
-                          variant="outline"
-                          size="sm"
-                          disabled={isTranslatingFile || !selectedDocuments}
-                        >
-                          {isTranslatingFile ? <Spinner /> : <RefreshCw />}
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        onClick={handleFileTranslate}
-                        disabled={isTranslatingFile || !selectedDocuments}
-                        size="sm"
-                      >
-                        {isTranslatingFile ? (
-                          <>
-                            <Spinner className="size-4" />
-                            Translating...
-                          </>
-                        ) : (
-                          <>
-                            <Languages />
-                            Translate
-                          </>
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                <div className="grid md:grid-cols-2 gap-2 min-h-[140px]">
-                  <Textarea
-                    id="file-raw-content"
-                    value={selectedDocumentContent}
-                    onChange={(e) => setSelectedDocumentContent(e.target.value)}
-                    className="h-full min-h-[400px] resize-none font-mono text-sm"
-                  />
-                  <Textarea
-                    id="file-translated-content"
-                    value={translatedFileContent}
-                    readOnly
-                    className="h-full min-h-[400px] resize-none bg-muted/50 font-mono text-sm"
-                  />
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {translatedFileContent.length} characters
-                </p>
-              </div>
-            </>
-          )}
+          <DocumentTab onTranslate={handleFileTranslate} />
         </TabsContent>
 
         <TabsContent value="image">
-          <Dropzone
-            accept={{ "image/*": [] }}
-            maxFiles={1}
-            onDrop={(files: File[]) => {
-              setSelectedImages(files);
-              setTranslatedImageContent("");
-              if (preview) {
-                URL.revokeObjectURL(preview);
-              }
-              const imageUrl = URL.createObjectURL(files[0]);
-              setPreview(imageUrl);
-            }}
-            onError={console.error}
-            src={selectedImages}
-            className="min-h-[140px]"
-          >
-            <DropzoneEmptyState />
-            <DropzoneContent />
-          </Dropzone>
-          <div className="space-y-2">
-            {preview && (
-              <>
-                <Separator className="my-4" />
-                <div className="flex gap-2 items-center">
-                  <div className="border border-border rounded-md w-full h-[200px] overflow-hidden flex items-center justify-center p-4">
-                    <Image
-                      src={preview || "/placeholder.svg"}
-                      width={400}
-                      height={300}
-                      alt="Selected image"
-                      className="max-w-full max-h-full object-contain"
-                    />
-                  </div>
-                  <Button
-                    size="icon-sm"
-                    onClick={handleImageTranslate}
-                    disabled={isTranslatingImage || !selectedImages?.[0]}
-                  >
-                    {isTranslatingImage ? (
-                      <Spinner className="size-4" />
-                    ) : (
-                      <ArrowRight className="min-w-8" />
-                    )}
-                  </Button>
-                  <div className="border border-border rounded-md w-full h-[200px] p-3">
-                    <Textarea
-                      value={translatedImageContent}
-                      readOnly
-                      placeholder="Translated text will appear here..."
-                      className="h-full resize-none bg-muted/50 text-sm"
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          <ImageTab onTranslate={handleImageTranslate} />
         </TabsContent>
       </Tabs>
 
-      {/* api 可用性检测 */}
-      <div className="mb-4 p-4 border rounded-lg bg-card">
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {apiStatus === "checking" && (
-                <>
-                  <Spinner className="h-4 w-4" />
-                  <span className="text-sm font-medium">
-                    Checking API status...
-                  </span>
-                </>
-              )}
-              {apiStatus === "available" && (
-                <>
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  <span className="text-sm font-medium text-green-500">
-                    API Available
-                  </span>
-                </>
-              )}
-              {apiStatus === "unavailable" && (
-                <>
-                  <AlertCircle className="h-4 w-4 text-red-500" />
-                  <span className="text-sm font-medium text-red-500">
-                    API Unavailable
-                  </span>
-                </>
-              )}
-              {apiStatus === "idle" && (
-                <>
-                  <Globe className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium text-muted-foreground">
-                    API Status
-                  </span>
-                </>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                Model: {apiConfig.model || "Not set"}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={checkApiAvailability}
-                disabled={apiStatus === "checking"}
-              >
-                {apiStatus === "checking" ? (
-                  <>
-                    <Spinner className="h-3 w-3 mr-2" />
-                    Checking...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-3 w-3 mr-2" />
-                    Test API
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-          {apiStatusMessage && (
-            <div className="text-xs text-muted-foreground">
-              {apiStatusMessage}
-            </div>
-          )}
-          <div className="pt-2 border-t">
-            <div className="text-xs text-muted-foreground mb-2">
-              Token Usage (Current Session)
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-              <div className="rounded-md border p-2 bg-background/50">
-                <div className="text-muted-foreground">Requests</div>
-                <div className="font-medium">{tokenStats.requests}</div>
-              </div>
-              <div className="rounded-md border p-2 bg-background/50">
-                <div className="text-muted-foreground">Input Tokens</div>
-                <div className="font-medium">
-                  {tokenStats.inputTokens.toLocaleString()}
-                </div>
-              </div>
-              <div className="rounded-md border p-2 bg-background/50">
-                <div className="text-muted-foreground">Output Tokens</div>
-                <div className="font-medium">
-                  {tokenStats.outputTokens.toLocaleString()}
-                </div>
-              </div>
-              <div className="rounded-md border p-2 bg-background/50">
-                <div className="text-muted-foreground">Total Tokens</div>
-                <div className="font-medium">
-                  {tokenStats.totalTokens.toLocaleString()}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <ApiStatusCard />
+
+      <footer className="mt-8 border-t pt-4 pb-2 text-xs text-muted-foreground space-y-1">
+        <p>
+          Privacy Notice: API keys are stored only in your browser local storage.
+          Translation requests are sent through this app&apos;s server API routes
+          to your configured model provider.
+        </p>
+        <p>
+          Copyright (c) {new Date().getFullYear()} AI Translator. All rights
+          reserved.
+        </p>
+        <p>
+          Built with Next.js, React, Tailwind CSS, shadcn/ui, and Vercel AI SDK.
+        </p>
+        <p>
+          Acknowledgements: OpenAI, Anthropic, Google model ecosystems, Radix UI,
+          Lucide Icons, and open-source contributors.
+        </p>
+      </footer>
     </div>
   );
 }

@@ -11,6 +11,24 @@ interface TokenUsage {
   totalTokens: number
 }
 
+function createAbortSignalWithTimeout(requestSignal: AbortSignal, timeoutMs: number) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => {
+    controller.abort(new Error("Request timeout"))
+  }, timeoutMs)
+
+  const handleAbort = () => controller.abort(requestSignal.reason)
+  requestSignal.addEventListener("abort", handleAbort, { once: true })
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer)
+      requestSignal.removeEventListener("abort", handleAbort)
+    },
+  }
+}
+
 function normalizeTokenUsage(usage: Partial<TokenUsage> | undefined): TokenUsage {
   return {
     inputTokens: usage?.inputTokens ?? 0,
@@ -43,6 +61,8 @@ export async function POST(request: NextRequest) {
     const apiKey = formData.get("apiKey") as string | null
     const baseUrl = formData.get("baseUrl") as string | null
     const textContent = formData.get("textContent") as string | null
+    const customPrompt = formData.get("customPrompt") as string | null
+    const outputMode = (formData.get("outputMode") as string | null) || "translation-only"
     const model = (formData.get("model") as string) || "gpt-4o-mini"
 
     if (!file) {
@@ -80,6 +100,10 @@ export async function POST(request: NextRequest) {
 
     let content: string
     let prompt: string
+    const customInstruction =
+      customPrompt && customPrompt.trim()
+        ? `Additional instructions:\n${customPrompt.trim()}\n\n`
+        : ""
 
     if (isImage) {
       // For images, use vision capabilities
@@ -96,7 +120,9 @@ ORIGINAL TEXT:
 TRANSLATED TEXT:
 [translated text here]
 
-Preserve the structure and formatting of the text as much as possible.`
+Preserve the structure and formatting of the text as much as possible.
+
+${customInstruction}`
 
       // Use vision model for images
       const visionModel = apiKey ? `${model}` : "openai/gpt-4o"
@@ -109,6 +135,8 @@ Preserve the structure and formatting of the text as much as possible.`
             })
           : undefined
 
+      const { signal, cleanup } = createAbortSignalWithTimeout(request.signal, 20_000)
+
       const { text: translatedContent, usage } = await generateText({
         model: openai ? openai(model) : visionModel,
         messages: [
@@ -120,7 +148,8 @@ Preserve the structure and formatting of the text as much as possible.`
             ],
           },
         ],
-      })
+        abortSignal: signal,
+      }).finally(() => cleanup())
 
       return NextResponse.json({
         translatedContent,
@@ -130,6 +159,15 @@ Preserve the structure and formatting of the text as much as possible.`
       // For text files, read content directly
       content = textContent ?? (await file.text())
 
+      const outputInstruction =
+        outputMode === "bilingual"
+          ? "- Return bilingual output with ORIGINAL and TRANSLATION sections"
+          : "- Return translated content only"
+      const closingInstruction =
+        outputMode === "bilingual"
+          ? "Provide bilingual output with clear ORIGINAL and TRANSLATION sections, without extra commentary."
+          : "Provide only the translated text with preserved formatting, without any explanations or additional comments."
+
       prompt = `You are a professional translator. Translate the following ${sourceLanguage} text to ${targetLanguage}.
 
 IMPORTANT INSTRUCTIONS:
@@ -138,12 +176,14 @@ IMPORTANT INSTRUCTIONS:
 - Preserve all URLs and file paths
 - Maintain the document structure exactly as it is
 - Only translate the actual text content, not the markdown syntax or code
+${outputInstruction}
+${customInstruction ? `- Follow these custom requirements:\n${customPrompt}\n` : ""}
 
 Text to translate:
 
 ${content}
 
-Provide only the translated text with preserved formatting, without any explanations or additional comments.`
+${closingInstruction}`
 
       const openai =
         apiKey
@@ -153,10 +193,13 @@ Provide only the translated text with preserved formatting, without any explanat
             })
           : undefined
 
+      const { signal, cleanup } = createAbortSignalWithTimeout(request.signal, 20_000)
+
       const { text: translatedContent, usage } = await generateText({
         model: openai ? openai(model) : `openai/${model}`,
         prompt,
-      })
+        abortSignal: signal,
+      }).finally(() => cleanup())
 
       return NextResponse.json({
         translatedContent,
@@ -170,6 +213,17 @@ Provide only the translated text with preserved formatting, without any explanat
     }
   } catch (error) {
     console.error("[v0] File translation error:", error)
+
+    if (
+      error instanceof Error &&
+      (error.name === "AbortError" || error.message === "Request timeout")
+    ) {
+      return NextResponse.json(
+        { error: "File translation request was canceled or timed out." },
+        { status: 504 },
+      )
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "File translation failed" },
       { status: 500 },
