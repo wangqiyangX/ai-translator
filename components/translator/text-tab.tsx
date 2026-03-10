@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useTranslatorRuntimeStore } from "./store";
 
 export function TextTab() {
+  const panelHeightClass = "h-[166px]";
   const sourceText = useTranslatorRuntimeStore((state) => state.sourceText);
   const translatedText = useTranslatorRuntimeStore((state) => state.translatedText);
   const isTranslating = useTranslatorRuntimeStore((state) => state.isTranslating);
@@ -27,10 +28,10 @@ export function TextTab() {
         placeholder="Enter text to translate..."
         value={sourceText}
         onChange={(e) => setSourceText(e.target.value)}
-        className="resize-none rounded-lg h-[240px]"
+        className={`resize-none rounded-lg ${panelHeightClass}`}
       />
 
-      <div className="relative h-[240px]">
+      <div className={`relative ${panelHeightClass}`}>
         <Button
           variant="outline"
           onClick={handleCopy}

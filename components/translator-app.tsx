@@ -128,6 +128,8 @@ export default function TranslatorApp() {
   const languageDetectAbortRef = useRef<AbortController | null>(null);
   const detectRequestIdRef = useRef(0);
   const sourceLangRef = useRef(sourceLang);
+  const previousSourceLangRef = useRef(sourceLang);
+  const previousTargetLangRef = useRef(targetLang);
   const skipNextLangChangeTranslateRef = useRef(false);
 
   const apiConfig = useTranslatorSettingsStore((state) => state.apiConfig);
@@ -400,6 +402,16 @@ export default function TranslatorApp() {
   useEffect(() => {
     if (!sourceText.trim()) return;
 
+    const sourceLangChanged = sourceLang !== previousSourceLangRef.current;
+    const targetLangChanged = targetLang !== previousTargetLangRef.current;
+
+    previousSourceLangRef.current = sourceLang;
+    previousTargetLangRef.current = targetLang;
+
+    if (!sourceLangChanged && !targetLangChanged) {
+      return;
+    }
+
     if (skipNextLangChangeTranslateRef.current) {
       skipNextLangChangeTranslateRef.current = false;
       return;
@@ -611,17 +623,15 @@ export default function TranslatorApp() {
   ]);
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-6xl">
-      <div className="flex items-center justify-between mb-8">
+    <div className="rounded-3xl border border-border/70 bg-card/80 p-4 shadow-sm backdrop-blur sm:p-6">
+      <div className="mb-6 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-primary/10 rounded-lg">
-            <Globe className="h-8 w-8 text-primary" />
+          <div className="rounded-xl bg-primary/10 p-2">
+            <Globe className="h-6 w-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-balance">AI Translator</h1>
-            <p className="text-muted-foreground text-pretty">
-              Powered by Vercel AI SDK
-            </p>
+            <p className="text-sm font-medium">Workspace</p>
+            <p className="text-sm text-muted-foreground">Powered by Vercel AI SDK</p>
           </div>
         </div>
 

@@ -8,9 +8,41 @@ import "./globals.css";
 const geist = Geist({ subsets: ["latin"] });
 const geistMono = Geist_Mono({ subsets: ["latin"] });
 
+function getMetadataBase() {
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (siteUrl) {
+    return new URL(siteUrl);
+  }
+
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) {
+    return new URL(`https://${vercelUrl}`);
+  }
+
+  return new URL("http://localhost:3000");
+}
+
 export const metadata: Metadata = {
-  title: "AI Translator",
-  description: "Created by Qiyang with v0",
+  metadataBase: getMetadataBase(),
+  title: {
+    default: "AI Translator",
+    template: "%s | AI Translator",
+  },
+  description:
+    "Translate text, Markdown documents, and images with your own AI model provider through a streamlined Next.js app.",
+  openGraph: {
+    title: "AI Translator",
+    description:
+      "Translate text, Markdown documents, and images with your own AI model provider.",
+    siteName: "AI Translator",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "AI Translator",
+    description:
+      "Translate text, Markdown documents, and images with your own AI model provider.",
+  },
 };
 
 export default function RootLayout({
